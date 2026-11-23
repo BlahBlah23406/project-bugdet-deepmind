@@ -1,0 +1,2760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Robot Arm Control Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+
+      --bg-light: #f4f6f9;
+      --bg-dark: #0f141c;
+      --panel-light: #ffffff;
+      --panel-dark: #171f2c;
+      --panel-alt-light: #eef2f7;
+      --panel-alt-dark: #1f293a;
+      --text-light: #151b26;
+      --text-dark: #e6edf7;
+      --muted-light: #5a667a;
+      --muted-dark: #93a1b8;
+      --border-light: #d6dde8;
+      --border-dark: #2c384e;
+
+      --brand-light: #0057b8;
+      --brand-dark: #4da3ff;
+      --brand-text-light: #ffffff;
+      --brand-text-dark: #081526;
+
+      --ok-light: #16794b;
+      --ok-dark: #3dd68c;
+      --warn-light: #b25900;
+      --warn-dark: #ffb547;
+      --danger-light: #c91c24;
+      --danger-dark: #ff5c64;
+
+      --bg: var(--bg-light);
+      --panel: var(--panel-light);
+      --panel-alt: var(--panel-alt-light);
+      --text: var(--text-light);
+      --muted: var(--muted-light);
+      --border: var(--border-light);
+      --brand: var(--brand-light);
+      --brand-text: var(--brand-text-light);
+      --ok: var(--ok-light);
+      --warn: var(--warn-light);
+      --danger: var(--danger-light);
+
+      @media (prefers-color-scheme: dark) {
+        --bg: var(--bg-dark);
+        --panel: var(--panel-dark);
+        --panel-alt: var(--panel-alt-dark);
+        --text: var(--text-dark);
+        --muted: var(--muted-dark);
+        --border: var(--border-dark);
+        --brand: var(--brand-dark);
+        --brand-text: var(--brand-text-dark);
+        --ok: var(--ok-dark);
+        --warn: var(--warn-dark);
+        --danger: var(--danger-dark);
+      }
+
+      @supports (color: light-dark(white, black)) {
+        --bg: light-dark(var(--bg-light), var(--bg-dark));
+        --panel: light-dark(var(--panel-light), var(--panel-dark));
+        --panel-alt: light-dark(var(--panel-alt-light), var(--panel-alt-dark));
+        --text: light-dark(var(--text-light), var(--text-dark));
+        --muted: light-dark(var(--muted-light), var(--muted-dark));
+        --border: light-dark(var(--border-light), var(--border-dark));
+        --brand: light-dark(var(--brand-light), var(--brand-dark));
+        --brand-text: light-dark(var(--brand-text-light), var(--brand-text-dark));
+        --ok: light-dark(var(--ok-light), var(--ok-dark));
+        --warn: light-dark(var(--warn-light), var(--warn-dark));
+        --danger: light-dark(var(--danger-light), var(--danger-dark));
+      }
+
+      accent-color: var(--brand);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 12px 16px 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+      accent-color: var(--brand);
+    }
+
+    /* Fallback for older browsers without accent-color */
+    @supports not (accent-color: #0057b8) {
+      input[type="range"]::-webkit-slider-thumb {
+        background: var(--brand);
+      }
+      input[type="range"]::-moz-range-thumb {
+        background: var(--brand);
+      }
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      margin: 0;
+      font-weight: 700;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+    }
+
+    .badge.ok {
+      border-color: var(--ok);
+      color: var(--ok);
+    }
+
+    .badge.warn {
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+
+    .badge.danger {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+
+    .conn-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      font: inherit;
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 7px 13px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+      color: var(--text);
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      transition: transform 0.05s ease, filter 0.12s ease, border-color 0.12s ease;
+    }
+
+    button:hover:not(:disabled) {
+      filter: brightness(1.06);
+      border-color: var(--brand);
+    }
+
+    button:active:not(:disabled),
+    button.active-hold {
+      transform: translateY(1px);
+      background: var(--brand);
+      color: var(--brand-text);
+      border-color: var(--brand);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button.primary {
+      background: var(--brand);
+      color: var(--brand-text);
+      border-color: var(--brand);
+    }
+
+    button.warn-btn {
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+
+    button.danger-btn {
+      background: var(--danger);
+      color: #ffffff;
+      border-color: var(--danger);
+    }
+
+    .stop-btn {
+      background: #d91c24;
+      color: #ffffff;
+      border: 2px solid #ff7a80;
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      padding: 10px 22px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(217, 28, 36, 0.35);
+    }
+
+    .stop-btn:hover:not(:disabled) {
+      background: #f0202a;
+      border-color: #ffffff;
+    }
+
+    .banner {
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .banner.error-banner {
+      background: rgba(201, 28, 36, 0.14);
+      border: 1px solid var(--danger);
+      color: var(--danger);
+    }
+
+    .banner.warn-banner {
+      background: rgba(178, 89, 0, 0.15);
+      border: 2px solid var(--warn);
+      color: var(--warn);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .grid-layout {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .col-telemetry { grid-column: span 5; }
+    .col-jog { grid-column: span 4; }
+    .col-actions { grid-column: span 3; }
+    .col-config { grid-column: span 6; }
+    .col-log { grid-column: span 6; }
+
+    @media (max-width: 1150px) {
+      .col-telemetry { grid-column: span 6; }
+      .col-jog { grid-column: span 6; }
+      .col-actions { grid-column: span 12; }
+      .col-config { grid-column: span 12; }
+      .col-log { grid-column: span 12; }
+    }
+
+    @media (max-width: 720px) {
+      .col-telemetry, .col-jog, .col-actions, .col-config, .col-log {
+        grid-column: span 12;
+      }
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .card-header h2 {
+      font-size: 0.95rem;
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    /* Gauges */
+    .gauges-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .gauge-item {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .gauge-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+
+    .gauge-label {
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .gauge-limit-text {
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .gauge-val {
+      font-size: 1.25rem;
+      font-weight: 800;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .gauge-svg {
+      width: 100%;
+      height: 26px;
+      display: block;
+      overflow: visible;
+    }
+
+    .claw-est-note {
+      margin-top: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--warn);
+      background: rgba(178, 89, 0, 0.14);
+      color: var(--warn);
+      font-size: 0.78rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    /* Telemetry pills */
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px;
+    }
+
+    .stat-box {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .stat-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .stat-value {
+      font-size: 0.95rem;
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .switches-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .sw-pill {
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-size: 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+    }
+
+    .sw-pill.sw-ok {
+      border-color: var(--ok);
+      color: var(--ok);
+    }
+
+    .sw-pill.sw-pressed {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #fff;
+    }
+
+    .sw-pill.sw-none {
+      color: var(--muted);
+      opacity: 0.75;
+    }
+
+    /* Jog pad and keycaps */
+    .jog-pad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      max-width: 280px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .jog-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 6px;
+      min-height: 60px;
+      border-radius: 8px;
+      font-weight: 700;
+      gap: 2px;
+    }
+
+    .jog-btn .key-hint {
+      font-size: 0.72rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .jog-btn.active-hold .key-hint {
+      background: rgba(0, 0, 0, 0.25);
+      color: inherit;
+      border-color: transparent;
+    }
+
+    .claw-jog-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* Held key visualizer & Cheat Sheet */
+    .keycaps-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .keycap {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      padding: 4px 7px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      border-bottom-width: 3px;
+      background: var(--panel-alt);
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      transition: all 0.06s ease;
+    }
+
+    .keycap span {
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: var(--muted);
+      font-family: inherit;
+    }
+
+    .keycap.lit {
+      background: var(--brand);
+      color: var(--brand-text);
+      border-color: var(--brand);
+      transform: translateY(1px);
+    }
+
+    .keycap.lit span {
+      color: var(--brand-text);
+    }
+
+    /* Form rows */
+    .form-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+      min-width: 75px;
+    }
+
+    .field-group label {
+      font-size: 0.73rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    input[type="number"],
+    input[type="text"] {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+      color: var(--text);
+      font: inherit;
+      font-size: 0.875rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      cursor: pointer;
+    }
+
+    .inline-confirm {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 7px;
+      border: 1px solid var(--warn);
+      background: rgba(178, 89, 0, 0.12);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .sub-section {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sub-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin: 0;
+    }
+
+    /* Log panel */
+    .log-output {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      height: 250px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .log-line {
+      word-break: break-all;
+      line-height: 1.35;
+    }
+
+    .log-line.log-err {
+      color: var(--danger);
+      font-weight: 700;
+    }
+
+    .log-line.log-msg {
+      color: var(--text);
+    }
+
+    .log-line.log-tx {
+      color: var(--brand);
+    }
+
+    .log-line.log-raw {
+      color: var(--warn);
+    }
+
+    .log-time {
+      color: var(--muted);
+      margin-right: 6px;
+      font-size: 0.72rem;
+    }
+
+    .cheatsheet-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    .cheatsheet-table th,
+    .cheatsheet-table td {
+      text-align: left;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cheatsheet-table th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    kbd {
+      display: inline-block;
+      padding: 1px 5px;
+      font-size: 0.74rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--panel-alt);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Web Serial Not Supported Warning -->
+  <div id="webSerialBanner" class="banner error-banner hidden" role="alert">
+    <span>Web Serial not supported, use Chrome or Edge (or try Demo / Simulator mode below).</span>
+  </div>
+
+  <!-- Stale Data Warning (no st line for > 1 s while connected) -->
+  <div id="staleBanner" class="banner error-banner hidden" role="alert">
+    <span>⚠️ Stale telemetry: No status (<code>st</code>) line received from controller in over 1 second!</span>
+    <button type="button" id="btnRetryPing">Query Status (?)</button>
+  </div>
+
+  <!-- Trusted = 0 Prominent Warning -->
+  <div id="untrustedBanner" class="banner warn-banner" role="alert">
+    <span>⚠️ Position not verified — move to a known pose and press Zero</span>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button type="button" id="btnBannerZero" class="warn-btn">Zero Pitch/Roll (Z)</button>
+    </div>
+  </div>
+
+  <header>
+    <div class="title-group">
+      <h1>🦾 Robot Arm Dashboard</h1>
+      <span id="connBadge" class="badge"><span class="dot"></span> <span id="connText">Disconnected</span></span>
+      <span id="fwBadge" class="badge hidden">FW v1</span>
+    </div>
+
+    <div class="conn-controls">
+      <button type="button" id="btnConnect" class="primary">Connect USB Serial</button>
+      <button type="button" id="btnSim">Start Demo / Simulator</button>
+      <button type="button" id="btnRefresh" title="Send ? to fetch cfg and st" disabled>Refresh (?)</button>
+      <button type="button" id="btnStopTop" class="stop-btn" title="Emergency Ramped Stop (Space)">STOP (Space)</button>
+    </div>
+  </header>
+
+  <main class="grid-layout">
+    <!-- 1. LIVE TELEMETRY & GAUGES -->
+    <section class="card col-telemetry" aria-label="Live Telemetry">
+      <div class="card-header">
+        <h2>Live Telemetry &amp; Joint Angles</h2>
+        <span id="movingBadge" class="badge">Idle</span>
+      </div>
+
+      <div class="gauges-list">
+        <!-- Pitch Gauge -->
+        <div class="gauge-item">
+          <div class="gauge-top">
+            <div>
+              <span class="gauge-label">Pitch (P)</span>
+              <span id="pitchLimLabel" class="gauge-limit-text">[Limits: OFF]</span>
+            </div>
+            <span class="gauge-val"><span id="valPitch">0.0</span>°</span>
+          </div>
+          <svg class="gauge-svg" viewBox="0 0 300 24" aria-label="Pitch angle gauge">
+            <rect x="0" y="6" width="300" height="12" rx="6" fill="var(--border)" />
+            <rect id="svgPitchLimRange" x="0" y="6" width="300" height="12" rx="4" fill="var(--brand)" opacity="0.25" />
+            <line x1="150" y1="3" x2="150" y2="21" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="2,2" />
+            <line id="svgPitchMinTick" x1="0" y1="3" x2="0" y2="21" stroke="var(--warn)" stroke-width="2" visibility="hidden" />
+            <line id="svgPitchMaxTick" x1="300" y1="3" x2="300" y2="21" stroke="var(--warn)" stroke-width="2" visibility="hidden" />
+            <circle id="svgPitchNeedle" cx="150" cy="12" r="7" fill="var(--brand)" stroke="var(--panel)" stroke-width="2" />
+          </svg>
+        </div>
+
+        <!-- Roll Gauge -->
+        <div class="gauge-item">
+          <div class="gauge-top">
+            <div>
+              <span class="gauge-label">Roll (R)</span>
+              <span id="rollLimLabel" class="gauge-limit-text">[Limits: OFF]</span>
+            </div>
+            <span class="gauge-val"><span id="valRoll">0.0</span>°</span>
+          </div>
+          <svg class="gauge-svg" viewBox="0 0 300 24" aria-label="Roll angle gauge">
+            <rect x="0" y="6" width="300" height="12" rx="6" fill="var(--border)" />
+            <rect id="svgRollLimRange" x="0" y="6" width="300" height="12" rx="4" fill="var(--brand)" opacity="0.25" />
+            <line x1="150" y1="3" x2="150" y2="21" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="2,2" />
+            <line id="svgRollMinTick" x1="0" y1="3" x2="0" y2="21" stroke="var(--warn)" stroke-width="2" visibility="hidden" />
+            <line id="svgRollMaxTick" x1="300" y1="3" x2="300" y2="21" stroke="var(--warn)" stroke-width="2" visibility="hidden" />
+            <circle id="svgRollNeedle" cx="150" cy="12" r="7" fill="var(--brand)" stroke="var(--panel)" stroke-width="2" />
+          </svg>
+        </div>
+
+        <!-- Claw Gauge -->
+        <div class="gauge-item">
+          <div class="gauge-top">
+            <div>
+              <span class="gauge-label">Claw (C)</span>
+              <span id="clawLimLabel" class="gauge-limit-text">[0° Open .. 90° Close]</span>
+            </div>
+            <span class="gauge-val"><span id="valClaw">0.0</span>°</span>
+          </div>
+          <svg class="gauge-svg" viewBox="0 0 300 24" aria-label="Claw angle gauge">
+            <rect x="0" y="6" width="300" height="12" rx="6" fill="var(--border)" />
+            <rect id="svgClawFill" x="0" y="6" width="0" height="12" rx="6" fill="var(--ok)" opacity="0.65" />
+            <circle id="svgClawNeedle" cx="0" cy="12" r="7" fill="var(--ok)" stroke="var(--panel)" stroke-width="2" />
+          </svg>
+          <div id="clawEstNote" class="claw-est-note hidden" role="status">
+            Estimate: the claw may have slipped on an object. Hold → (open) to re-sync at the open stop.
+          </div>
+        </div>
+      </div>
+
+      <!-- Raw Steps & System Flags -->
+      <div class="status-grid">
+        <div class="stat-box">
+          <span class="stat-label">Motor j2 (A2)</span>
+          <span class="stat-value"><span id="valJ2">0</span> stp</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Motor j3 (A3)</span>
+          <span class="stat-value"><span id="valJ3">0</span> stp</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Drivers (D43)</span>
+          <span id="valDrivers" class="stat-value">OFF</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Position Trust</span>
+          <span id="valTrusted" class="stat-value">UNVERIFIED</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Speed Scale</span>
+          <span class="stat-value"><span id="valSpd">50</span>%</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Watchdog</span>
+          <span id="valWatchdog" class="stat-value">OK</span>
+        </div>
+      </div>
+
+      <!-- Limit switches & Claw sensors -->
+      <div class="sub-section">
+        <p class="sub-title">Limit Switches (D22..D30) &amp; Claw Sensors</p>
+        <div class="switches-row">
+          <span id="limD22" class="sw-pill sw-none" title="Pin D22">D22: -</span>
+          <span id="limD24" class="sw-pill sw-none" title="Pin D24">D24: -</span>
+          <span id="limD26" class="sw-pill sw-none" title="Pin D26">D26: -</span>
+          <span id="limD28" class="sw-pill sw-none" title="Pin D28">D28: -</span>
+          <span id="limD30" class="sw-pill sw-none" title="Pin D30">D30: -</span>
+          <span id="clawSwBadge" class="sw-pill sw-none" title="Claw Switch D32">Claw SW: None</span>
+          <span id="clawEncBadge" class="sw-pill sw-none" title="AS5600 Encoder 0x36">AS5600: Not detected</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. HOLD-TO-MOVE JOG CONTROLS & KEY VISUALIZER -->
+    <section class="card col-jog" aria-label="Manual Jog Controls">
+      <div class="card-header">
+        <h2>Hold-to-Jog Controls</h2>
+        <label style="font-size:0.8rem; font-weight:600; display:flex; align-items:center; gap:5px; cursor:pointer;">
+          <input type="checkbox" id="chkPrecision">
+          <span>Precision 25% (Shift)</span>
+        </label>
+      </div>
+
+      <!-- Differential Pitch / Roll D-Pad -->
+      <div class="jog-pad-grid">
+        <div></div>
+        <button type="button" class="jog-btn" data-jog-pitch="1" id="btnJogPitchUp">
+          <span>▲ Pitch +</span>
+          <span class="key-hint">W</span>
+        </button>
+        <div></div>
+
+        <button type="button" class="jog-btn" data-jog-roll="-1" id="btnJogRollLeft">
+          <span>◄ Roll −</span>
+          <span class="key-hint">A</span>
+        </button>
+        <button type="button" class="jog-btn danger-btn" id="btnJogStopCenter" title="Stop Everything (Space)">
+          <span>STOP</span>
+          <span class="key-hint">Space</span>
+        </button>
+        <button type="button" class="jog-btn" data-jog-roll="1" id="btnJogRollRight">
+          <span>Roll + ►</span>
+          <span class="key-hint">D</span>
+        </button>
+
+        <div></div>
+        <button type="button" class="jog-btn" data-jog-pitch="-1" id="btnJogPitchDown">
+          <span>▼ Pitch −</span>
+          <span class="key-hint">S</span>
+        </button>
+        <div></div>
+      </div>
+
+      <!-- Claw Hold Buttons (Matches ArmKeys.ps1: Left = Close, Right = Open) -->
+      <div class="sub-section">
+        <p class="sub-title">Claw Jog (0° = Open, Counts Up Closing)</p>
+        <div class="claw-jog-row">
+          <button type="button" class="jog-btn" data-jog-claw="1" id="btnJogClawClose">
+            <span>►◄ Claw Close (+)</span>
+            <span class="key-hint">← Left Arrow</span>
+          </button>
+          <button type="button" class="jog-btn" data-jog-claw="-1" id="btnJogClawOpen">
+            <span>◄► Claw Open (−)</span>
+            <span class="key-hint">Right Arrow →</span>
+          </button>
+        </div>
+        <p style="margin:0; font-size:0.75rem; color:var(--muted);">Opening fully drives a little past 0 into the open stop to re-sync the count.</p>
+      </div>
+
+      <!-- Speed Slider -->
+      <div class="sub-section">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label for="sliderSpeed" class="sub-title">Speed % (<kbd>↑</kbd>/<kbd>↓</kbd> ±10%)</label>
+          <span style="font-weight:700; font-family:monospace;"><span id="lblSpeedSlider">50</span>%</span>
+        </div>
+        <div class="form-row">
+          <button type="button" id="btnSpdDown" title="Decrease speed 10% (Down Arrow)">−10%</button>
+          <input type="range" id="sliderSpeed" min="10" max="100" step="5" value="50">
+          <button type="button" id="btnSpdUp" title="Increase speed 10% (Up Arrow)">+10%</button>
+        </div>
+      </div>
+
+      <!-- Visualized Keycaps -->
+      <div class="sub-section">
+        <p class="sub-title">Live Keyboard Visualizer</p>
+        <div class="keycaps-wrap" id="keyVisualizer">
+          <div class="keycap" data-keycap="KeyW">W<span>Pitch+</span></div>
+          <div class="keycap" data-keycap="KeyS">S<span>Pitch−</span></div>
+          <div class="keycap" data-keycap="KeyA">A<span>Roll−</span></div>
+          <div class="keycap" data-keycap="KeyD">D<span>Roll+</span></div>
+          <div class="keycap" data-keycap="ArrowLeft">←<span>Close</span></div>
+          <div class="keycap" data-keycap="ArrowRight">→<span>Open</span></div>
+          <div class="keycap" data-keycap="ArrowUp">↑<span>Spd+</span></div>
+          <div class="keycap" data-keycap="ArrowDown">↓<span>Spd−</span></div>
+          <div class="keycap" data-keycap="Shift">Shift<span>25%</span></div>
+          <div class="keycap" data-keycap="Space">Space<span>STOP</span></div>
+          <div class="keycap" data-keycap="KeyE">E<span>Drv</span></div>
+          <div class="keycap" data-keycap="KeyZ">Z<span>Zero</span></div>
+          <div class="keycap" data-keycap="KeyH">H<span>HomeC</span></div>
+          <div class="keycap" data-keycap="Question">?<span>Query</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. DRIVERS, ZEROING, HOMING & GO-TO -->
+    <section class="card col-actions" aria-label="Positioning and Calibration">
+      <div class="card-header">
+        <h2>Drivers, Zero &amp; Go-To</h2>
+      </div>
+
+      <!-- Drivers Control -->
+      <div class="sub-section" style="border-top:none; padding-top:0;">
+        <p class="sub-title">Stepper Drivers (Pin D43, Key <kbd>E</kbd>)</p>
+        <div class="form-row">
+          <button type="button" id="btnDriversOn" class="primary" style="flex:1;">Enable Drivers (E 1)</button>
+          <button type="button" id="btnDriversOff" style="flex:1;">Disable / Limp (E 0)</button>
+        </div>
+      </div>
+
+      <!-- Zero & Calibration with Inline Confirmation -->
+      <div class="sub-section">
+        <p class="sub-title">Zero &amp; Claw Calibration</p>
+        <div class="form-row">
+          <button type="button" id="btnZeroTrigger" class="warn-btn" style="flex:1;">Zero Pitch/Roll (Z)</button>
+          <div id="zeroConfirmBox" class="inline-confirm hidden">
+            <span>Set P=0, R=0 &amp; Trust?</span>
+            <button type="button" id="btnZeroConfirmYes" class="primary">Confirm Zero</button>
+            <button type="button" id="btnZeroConfirmNo">Cancel</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <button type="button" id="btnClawZero" title="Set current claw position as 0 (fully open)">Claw Zero (ZC)</button>
+          <button type="button" id="btnClawHome" title="Home claw (HC, Key H)">Home Claw (HC)</button>
+          <button type="button" id="btnClawSetMax" title="Set claw close limit to current angle (KC)">Set Close Limit (KC)</button>
+        </div>
+      </div>
+
+      <!-- Coordinated Go-To (G) -->
+      <div class="sub-section">
+        <p class="sub-title">Coordinated Joint Go-To (<code>G</code>)</p>
+        <div class="form-row">
+          <div class="field-group">
+            <label for="inpGoPitch">Pitch (deg)</label>
+            <input type="number" id="inpGoPitch" value="0" step="1">
+          </div>
+          <div class="field-group">
+            <label for="inpGoRoll">Roll (deg)</label>
+            <input type="number" id="inpGoRoll" value="0" step="1">
+          </div>
+          <button type="button" id="btnGoJoints" class="primary" style="align-self:flex-end;">Go (G)</button>
+        </div>
+        <div class="form-row">
+          <button type="button" id="btnGoZeroPose" style="width:100%;">Go to 0°, 0° Origin</button>
+        </div>
+      </div>
+
+      <!-- Claw Go-To (GC) -->
+      <div class="sub-section">
+        <p class="sub-title">Claw Go-To (<code>GC</code>)</p>
+        <div class="form-row">
+          <div class="field-group">
+            <label for="inpGoClaw">Claw Angle (0=Open)</label>
+            <input type="number" id="inpGoClaw" value="0" min="0" max="360" step="5">
+          </div>
+          <button type="button" id="btnGoClaw" class="primary" style="align-self:flex-end;">Claw Go (GC)</button>
+        </div>
+      </div>
+
+      <!-- Raw Single-Motor Test (M) -->
+      <div class="sub-section">
+        <p class="sub-title">Raw Motor Test (Hold sends <code>M &lt;j2&gt; &lt;j3&gt;</code>)</p>
+        <div class="form-row">
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j2="1">j2 + (A2)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j2="-1">j2 − (A2)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j3="1">j3 + (A3)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j3="-1">j3 − (A3)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. SOFT LIMITS, HARDWARE CONFIG & KEYBIND CHEAT-SHEET -->
+    <section class="card col-config" aria-label="Configuration and Soft Limits">
+      <div class="card-header">
+        <h2>Soft Limits &amp; Controller Config</h2>
+      </div>
+
+      <!-- Soft Limits Editor (LIM, LIM OFF, LIMHERE) -->
+      <div class="sub-section" style="border-top:none; padding-top:0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+          <p class="sub-title">Joint Soft Limits (Degrees)</p>
+          <span id="limActiveStatus" class="badge">Limits: OFF</span>
+        </div>
+        <div class="form-row">
+          <div class="field-group">
+            <label for="inpLimPMin">Pitch Min</label>
+            <input type="number" id="inpLimPMin" value="-45" step="1">
+          </div>
+          <div class="field-group">
+            <label for="inpLimPMax">Pitch Max</label>
+            <input type="number" id="inpLimPMax" value="45" step="1">
+          </div>
+          <div class="field-group">
+            <label for="inpLimRMin">Roll Min</label>
+            <input type="number" id="inpLimRMin" value="-90" step="1">
+          </div>
+          <div class="field-group">
+            <label for="inpLimRMax">Roll Max</label>
+            <input type="number" id="inpLimRMax" value="90" step="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <button type="button" id="btnLimApply" class="primary">Apply Limits (LIM)</button>
+          <button type="button" id="btnLimOff">Disable Limits (LIM OFF)</button>
+        </div>
+        <div class="form-row">
+          <span style="font-size:0.75rem; color:var(--muted); font-weight:600;">Set from current angle:</span>
+          <button type="button" data-limhere="PMIN">LIMHERE PMIN</button>
+          <button type="button" data-limhere="PMAX">LIMHERE PMAX</button>
+          <button type="button" data-limhere="RMIN">LIMHERE RMIN</button>
+          <button type="button" data-limhere="RMAX">LIMHERE RMAX</button>
+        </div>
+      </div>
+
+      <!-- Motion & Gear Config (CFG & INV) -->
+      <div class="sub-section">
+        <p class="sub-title">Kinematics &amp; Ramp Config (<code>CFG</code> / <code>INV</code>)</p>
+        <div class="form-row">
+          <div class="field-group">
+            <label for="inpCfgGear">Gear Ratio (turns/out)</label>
+            <input type="number" id="inpCfgGear" value="1.0" min="0.01" step="0.1">
+          </div>
+          <div class="field-group">
+            <label for="inpCfgMax">Max Speed (steps/s)</label>
+            <input type="number" id="inpCfgMax" value="1200" min="50" max="10000" step="50">
+          </div>
+          <div class="field-group">
+            <label for="inpCfgAcc">Accel (steps/s²)</label>
+            <input type="number" id="inpCfgAcc" value="1500" min="50" max="20000" step="50">
+          </div>
+          <button type="button" id="btnCfgSave" class="primary" style="align-self:flex-end;">Save CFG</button>
+        </div>
+
+        <div class="form-row" style="margin-top:4px; justify-content:space-between;">
+          <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:0.8rem; font-weight:600; color:var(--muted);">Motor Direction Invert:</span>
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="chkInvJ2">
+              <span>Invert j2 (A2)</span>
+            </label>
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="chkInvJ3">
+              <span>Invert j3 (A3)</span>
+            </label>
+          </div>
+          <span style="font-size:0.78rem; color:var(--muted); font-family:monospace;">
+            Claw cmax: <strong id="valCfgCmax">90.0</strong>°
+          </span>
+        </div>
+      </div>
+
+      <!-- Keybind Cheat-Sheet -->
+      <div class="sub-section">
+        <p class="sub-title">Keyboard Shortcuts Cheat-Sheet</p>
+        <table class="cheatsheet-table" aria-label="Keyboard Shortcuts">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Action</th>
+              <th>Key</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><kbd>W</kbd> / <kbd>S</kbd></td>
+              <td>Pitch + / − (hold)</td>
+              <td><kbd>Space</kbd></td>
+              <td><strong>STOP</strong> everything (`S`)</td>
+            </tr>
+            <tr>
+              <td><kbd>A</kbd> / <kbd>D</kbd></td>
+              <td>Roll − / + (hold)</td>
+              <td><kbd>E</kbd></td>
+              <td>Toggle Drivers ON/OFF (`E 1`/`0`)</td>
+            </tr>
+            <tr>
+              <td><kbd>←</kbd> / <kbd>→</kbd></td>
+              <td>Claw Close / Open (hold). Opening fully drives a little past 0 into the open stop to re-sync the count.</td>
+              <td><kbd>Z</kbd></td>
+              <td>Zero Pitch &amp; Roll (opens confirm)</td>
+            </tr>
+            <tr>
+              <td><kbd>↑</kbd> / <kbd>↓</kbd></td>
+              <td>Speed +10% / −10% (`SPD`)</td>
+              <td><kbd>H</kbd></td>
+              <td>Home Claw (`HC`)</td>
+            </tr>
+            <tr>
+              <td><kbd>Shift</kbd></td>
+              <td>Precision Jog (25% speed)</td>
+              <td><kbd>?</kbd></td>
+              <td>Refresh Status &amp; Config (`?`)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5. SERIAL LOG & MANUAL COMMAND INPUT -->
+    <section class="card col-log" aria-label="Serial Log and Command Console">
+      <div class="card-header">
+        <h2>Serial Console &amp; Messages</h2>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <label style="font-size:0.75rem; color:var(--muted); display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="chkLogTx">
+            <span>Show TX commands</span>
+          </label>
+          <button type="button" id="btnClearLog">Clear Log</button>
+        </div>
+      </div>
+
+      <div id="logContainer" class="log-output" role="log" aria-live="polite"></div>
+
+      <form id="cmdForm" class="form-row" autocomplete="off">
+        <input type="text" id="inpManualCmd" placeholder="Send raw command (e.g. ?, G 15 -10, LIM -45 45 -90 90, SPD 60)..." aria-label="Manual serial command">
+        <button type="submit" class="primary">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // =========================================================================
+      // 1. SIMULATOR / FAKE MEGA 2560 BOARD (Implements PROTOCOL.md v1)
+      // =========================================================================
+      class SimulatedMegaBoard {
+        constructor(onEmitLine) {
+          this.onEmitLine = onEmitLine;
+          this.STEPS_PER_REV = 1600; // A4988 1/8 microstep (200 * 8)
+          this.CLAW_STEPS_PER_REV = 4096; // 28BYJ-48 half-steps
+
+          // Persisted / Config state
+          this.ver = 1;
+          this.gear = 1.0;
+          this.maxSteps = 1200;
+          this.accel = 1500;
+          this.lim = null; // [pmin, pmax, rmin, rmax] in deg or null
+          this.inv = [0, 0]; // [j2_inv, j3_inv]
+          this.cmax = 90.0; // claw close limit deg
+
+          // Dynamic state
+          this.j2 = 0; // float internal steps, rounded on output
+          this.j3 = 0;
+          this.cSteps = 0;
+          this.v2 = 0; // current velocity steps/s
+          this.v3 = 0;
+          this.vc = 0;
+
+          this.en = 1;
+          this.tr = 1;
+          this.spd = 50;
+          this.wd = 0;
+          this.limPins = '00000'; // D22..D30
+          this.sw = 0;
+          this.enc = 0;
+          this.cu = 0;
+
+          // Motion mode: 'idle' | 'jog_v' | 'jog_m' | 'goto_g' | 'stopping'
+          this.mode = 'idle';
+          this.cmdPitchPct = 0;
+          this.cmdRollPct = 0;
+          this.cmdClawPct = 0;
+          this.cmdM2Pct = 0;
+          this.cmdM3Pct = 0;
+
+          this.targetJ2 = 0;
+          this.targetJ3 = 0;
+          this.clawMode = 'idle'; // 'idle' | 'jog' | 'goto' | 'homing'
+          this.targetCSteps = 0;
+
+          this.lastWatchdogFeedMs = Date.now();
+          this.lastStepMs = Date.now();
+          this.physicsTimer = null;
+          this.statusTimer = null;
+          this.bootTimer = null;
+        }
+
+        stepsPerDeg() {
+          return (this.STEPS_PER_REV * this.gear) / 360.0;
+        }
+
+        clawStepsPerDeg() {
+          return this.CLAW_STEPS_PER_REV / 360.0;
+        }
+
+        getPitchDeg() {
+          const pitchSteps = (this.j2 + this.j3) / 2.0;
+          return pitchSteps / this.stepsPerDeg();
+        }
+
+        getRollDeg() {
+          const rollSteps = (this.j2 - this.j3) / 2.0;
+          return rollSteps / this.stepsPerDeg();
+        }
+
+        getClawDeg() {
+          return Math.max(0, this.cSteps / this.clawStepsPerDeg());
+        }
+
+        emit(obj) {
+          if (this.onEmitLine) {
+            this.onEmitLine(JSON.stringify(obj));
+          }
+        }
+
+        start() {
+          const now = Date.now();
+          this.lastStepMs = now;
+          this.lastWatchdogFeedMs = now;
+          // Simulate brief boot then emit hello, cfg, st
+          this.bootTimer = setTimeout(() => {
+            this.emit({ t: 'hello', fw: 'ArmDashboard', ver: 1 });
+            this.emitCfg();
+            this.emitSt();
+          }, 80);
+
+          this.physicsTimer = setInterval(() => this.stepPhysics(), 20);
+          this.statusTimer = setInterval(() => this.emitSt(), 100);
+        }
+
+        stop() {
+          if (this.bootTimer) clearTimeout(this.bootTimer);
+          if (this.physicsTimer) clearInterval(this.physicsTimer);
+          if (this.statusTimer) clearInterval(this.statusTimer);
+          this.bootTimer = null;
+          this.physicsTimer = null;
+          this.statusTimer = null;
+        }
+
+        emitCfg() {
+          this.emit({
+            t: 'cfg',
+            ver: this.ver,
+            gear: Number(this.gear.toFixed(3)),
+            max: Math.round(this.maxSteps),
+            acc: Math.round(this.accel),
+            lim: this.lim ? this.lim.map(v => Number(v.toFixed(1))) : null,
+            inv: [this.inv[0] ? 1 : 0, this.inv[1] ? 1 : 0],
+            cmax: Number(this.cmax.toFixed(1))
+          });
+        }
+
+        emitSt() {
+          const moving = (Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.vc) > 0.5 ||
+                          this.mode === 'goto_g' || this.clawMode === 'goto' || this.clawMode === 'homing') ? 1 : 0;
+          this.emit({
+            t: 'st',
+            j2: Math.round(this.j2),
+            j3: Math.round(this.j3),
+            p: Number(this.getPitchDeg().toFixed(1)),
+            r: Number(this.getRollDeg().toFixed(1)),
+            c: Number(this.getClawDeg().toFixed(1)),
+            mv: moving,
+            en: this.en ? 1 : 0,
+            tr: this.tr ? 1 : 0,
+            spd: Math.round(this.spd),
+            wd: this.wd ? 1 : 0,
+            lim: this.limPins,
+            sw: this.sw,
+            enc: this.enc,
+            cu: this.cu ? 1 : 0
+          });
+        }
+
+        stepPhysics() {
+          const now = Date.now();
+          const dt = Math.min(0.1, Math.max(0.001, (now - this.lastStepMs) / 1000.0));
+          this.lastStepMs = now;
+
+          // Check 400ms watchdog while jogging
+          const isJogging = (this.mode === 'jog_v' && (this.cmdPitchPct !== 0 || this.cmdRollPct !== 0)) ||
+                            (this.mode === 'jog_m' && (this.cmdM2Pct !== 0 || this.cmdM3Pct !== 0)) ||
+                            (this.clawMode === 'jog' && this.cmdClawPct !== 0);
+          if (isJogging && (now - this.lastWatchdogFeedMs > 400)) {
+            this.wd = 1;
+            this.cmdPitchPct = 0;
+            this.cmdRollPct = 0;
+            this.cmdClawPct = 0;
+            this.cmdM2Pct = 0;
+            this.cmdM3Pct = 0;
+            this.mode = 'idle';
+            this.clawMode = 'idle';
+            this.emit({ t: 'msg', s: 'Watchdog tripped (400ms timeout) — decelerating to stop' });
+          }
+
+          if (!this.en) {
+            this.v2 = 0;
+            this.v3 = 0;
+            this.vc = 0;
+            this.mode = 'idle';
+            this.clawMode = 'idle';
+            return;
+          }
+
+          const effectiveMax = this.maxSteps * (this.spd / 100.0);
+          let desV2 = 0;
+          let desV3 = 0;
+          let rampAcc = this.accel;
+
+          if (this.mode === 'stopping') {
+            desV2 = 0;
+            desV3 = 0;
+            rampAcc = this.accel * 3.0; // S command uses 3x accel
+            if (Math.abs(this.v2) < 1 && Math.abs(this.v3) < 1) {
+              this.v2 = 0;
+              this.v3 = 0;
+              this.mode = 'idle';
+            }
+          } else if (this.mode === 'jog_v') {
+            let pPct = this.cmdPitchPct;
+            let rPct = this.cmdRollPct;
+
+            // Enforce soft limits in joint space during jogging
+            if (this.lim) {
+              const [pmin, pmax, rmin, rmax] = this.lim;
+              const curP = this.getPitchDeg();
+              const curR = this.getRollDeg();
+              if ((curP >= pmax && pPct > 0) || (curP <= pmin && pPct < 0)) pPct = 0;
+              if ((curR >= rmax && rPct > 0) || (curR <= rmin && rPct < 0)) rPct = 0;
+            }
+
+            // Mixing: if |pitch| + |roll| > 100, scale both down
+            const sum = Math.abs(pPct) + Math.abs(rPct);
+            let scale = 1.0;
+            if (sum > 100) scale = 100.0 / sum;
+
+            const pScaled = pPct * scale;
+            const rScaled = rPct * scale;
+            desV2 = ((pScaled + rScaled) / 100.0) * effectiveMax;
+            desV3 = ((pScaled - rScaled) / 100.0) * effectiveMax;
+          } else if (this.mode === 'jog_m') {
+            const s2 = this.inv[0] ? -1 : 1;
+            const s3 = this.inv[1] ? -1 : 1;
+            desV2 = (this.cmdM2Pct / 100.0) * effectiveMax * s2;
+            desV3 = (this.cmdM3Pct / 100.0) * effectiveMax * s3;
+          } else if (this.mode === 'goto_g') {
+            const rem2 = this.targetJ2 - this.j2;
+            const rem3 = this.targetJ3 - this.j3;
+            const maxRem = Math.max(Math.abs(rem2), Math.abs(rem3));
+            if (maxRem < 1.0 && Math.abs(this.v2) < 5 && Math.abs(this.v3) < 5) {
+              this.j2 = this.targetJ2;
+              this.j3 = this.targetJ3;
+              this.v2 = 0;
+              this.v3 = 0;
+              this.mode = 'idle';
+            } else {
+              // Coordinated arrival: scale speeds by ratio of remaining distance
+              const ratio2 = maxRem > 0 ? Math.abs(rem2) / maxRem : 0;
+              const ratio3 = maxRem > 0 ? Math.abs(rem3) / maxRem : 0;
+              const stopSpeed2 = Math.sqrt(2 * this.accel * ratio2 * Math.abs(rem2));
+              const stopSpeed3 = Math.sqrt(2 * this.accel * ratio3 * Math.abs(rem3));
+              const spd2 = Math.min(effectiveMax * ratio2, stopSpeed2);
+              const spd3 = Math.min(effectiveMax * ratio3, stopSpeed3);
+              desV2 = Math.sign(rem2) * spd2;
+              desV3 = Math.sign(rem3) * spd3;
+            }
+          }
+
+          // Coordinated ramp for v2 and v3
+          const dv2 = desV2 - this.v2;
+          const dv3 = desV3 - this.v3;
+          const maxDv = Math.max(Math.abs(dv2), Math.abs(dv3));
+          const allowedDv = rampAcc * dt;
+          if (maxDv <= allowedDv || maxDv === 0) {
+            this.v2 = desV2;
+            this.v3 = desV3;
+          } else {
+            const frac = allowedDv / maxDv;
+            this.v2 += dv2 * frac;
+            this.v3 += dv3 * frac;
+          }
+
+          this.j2 += this.v2 * dt;
+          this.j3 += this.v3 * dt;
+
+          // Clamp soft limits if active during jog_v
+          if (this.lim && this.mode === 'jog_v') {
+            const [pmin, pmax, rmin, rmax] = this.lim;
+            const spd = this.stepsPerDeg();
+            let p = this.getPitchDeg();
+            let r = this.getRollDeg();
+            let clamped = false;
+            if (p > pmax) { p = pmax; clamped = true; }
+            if (p < pmin) { p = pmin; clamped = true; }
+            if (r > rmax) { r = rmax; clamped = true; }
+            if (r < rmin) { r = rmin; clamped = true; }
+            if (clamped) {
+              const ps = p * spd;
+              const rs = r * spd;
+              this.j2 = ps + rs;
+              this.j3 = ps - rs;
+            }
+          }
+
+          // Claw motion (28BYJ-48, ~600 half-steps/s max)
+          const clawMaxStepsPerSec = 600 * (this.spd / 100.0);
+          const maxClawSteps = this.cmax * this.clawStepsPerDeg();
+          const openOvershootSteps = -Math.round(20 * this.clawStepsPerDeg());
+          if (this.clawMode === 'jog') {
+            this.vc = (this.cmdClawPct / 100.0) * clawMaxStepsPerSec;
+            if (this.vc > 0 && !this.enc) {
+              this.cu = 1;
+            }
+            this.cSteps += this.vc * dt;
+            if (this.vc < 0 && this.cSteps <= 0) {
+              this.cu = 0;
+            }
+            if (this.cSteps <= openOvershootSteps) {
+              this.cSteps = 0;
+              this.cu = 0;
+              if (this.vc < 0) this.vc = 0;
+            }
+            if (this.cSteps >= maxClawSteps) { this.cSteps = maxClawSteps; if (this.vc > 0) this.vc = 0; }
+          } else if (this.clawMode === 'goto' || this.clawMode === 'homing') {
+            const remC = this.targetCSteps - this.cSteps;
+            const stepC = clawMaxStepsPerSec * dt;
+            if (remC > 0 && !this.enc) {
+              this.cu = 1;
+            }
+            if (Math.abs(remC) <= stepC) {
+              this.cSteps = this.targetCSteps;
+              this.vc = 0;
+              if (this.cSteps <= 0) {
+                this.cSteps = 0;
+                this.cu = 0;
+              }
+              if (this.clawMode === 'homing') {
+                this.cSteps = 0;
+                this.cu = 0;
+                this.emit({ t: 'msg', s: 'Claw homing complete (position reset to 0)' });
+              }
+              this.clawMode = 'idle';
+            } else {
+              this.vc = Math.sign(remC) * clawMaxStepsPerSec;
+              this.cSteps += this.vc * dt;
+              if (this.vc < 0 && this.cSteps <= 0) {
+                this.cu = 0;
+              }
+            }
+          } else {
+            if (this.cSteps < 0) this.cSteps = 0;
+            this.vc = 0;
+          }
+        }
+
+        handleCommand(rawLine) {
+          const line = rawLine.trim();
+          if (!line) return;
+          const tokens = line.split(/\s+/);
+          const cmd = tokens[0].toUpperCase();
+
+          switch (cmd) {
+            case 'V': {
+              if (tokens.length < 4) {
+                this.emit({ t: 'err', s: 'V requires 3 args: V <pitch> <roll> <claw>' });
+                return;
+              }
+              const p = parseInt(tokens[1], 10);
+              const r = parseInt(tokens[2], 10);
+              const c = parseInt(tokens[3], 10);
+              if (Number.isNaN(p) || Number.isNaN(r) || Number.isNaN(c)) {
+                this.emit({ t: 'err', s: 'V args must be integers -100..100' });
+                return;
+              }
+              this.lastWatchdogFeedMs = Date.now();
+              this.wd = 0;
+              this.cmdPitchPct = Math.max(-100, Math.min(100, p));
+              this.cmdRollPct = Math.max(-100, Math.min(100, r));
+              this.cmdClawPct = Math.max(-100, Math.min(100, c));
+              if (this.cmdClawPct > 0 && !this.enc) {
+                this.cu = 1;
+              } else if (this.cmdClawPct === 0 && this.cSteps < 0) {
+                this.cSteps = 0;
+                this.cu = 0;
+              }
+              this.mode = 'jog_v';
+              this.clawMode = this.cmdClawPct !== 0 ? 'jog' : 'idle';
+              break;
+            }
+            case 'M': {
+              if (tokens.length < 3) {
+                this.emit({ t: 'err', s: 'M requires 2 args: M <j2> <j3>' });
+                return;
+              }
+              const m2 = parseInt(tokens[1], 10);
+              const m3 = parseInt(tokens[2], 10);
+              if (Number.isNaN(m2) || Number.isNaN(m3)) {
+                this.emit({ t: 'err', s: 'M args must be integers -100..100' });
+                return;
+              }
+              this.lastWatchdogFeedMs = Date.now();
+              this.wd = 0;
+              this.cmdM2Pct = Math.max(-100, Math.min(100, m2));
+              this.cmdM3Pct = Math.max(-100, Math.min(100, m3));
+              this.mode = 'jog_m';
+              break;
+            }
+            case 'P': {
+              this.lastWatchdogFeedMs = Date.now();
+              break;
+            }
+            case 'S': {
+              this.cmdPitchPct = 0;
+              this.cmdRollPct = 0;
+              this.cmdClawPct = 0;
+              this.cmdM2Pct = 0;
+              this.cmdM3Pct = 0;
+              this.mode = 'stopping';
+              this.clawMode = 'idle';
+              this.vc = 0;
+              this.emit({ t: 'msg', s: 'Emergency stop (S)' });
+              break;
+            }
+            case 'G': {
+              if (tokens.length < 3) {
+                this.emit({ t: 'err', s: 'G requires 2 args: G <pitch_deg> <roll_deg>' });
+                return;
+              }
+              if (!this.tr) {
+                this.emit({ t: 'err', s: 'Move refused: position not trusted (zero joints with Z first)' });
+                return;
+              }
+              if (!this.en) {
+                this.emit({ t: 'err', s: 'Move refused: drivers are disabled (E 1 first)' });
+                return;
+              }
+              const targetP = parseFloat(tokens[1]);
+              const targetR = parseFloat(tokens[2]);
+              if (Number.isNaN(targetP) || Number.isNaN(targetR)) {
+                this.emit({ t: 'err', s: 'Invalid pitch/roll angles for G' });
+                return;
+              }
+              if (this.lim) {
+                const [pmin, pmax, rmin, rmax] = this.lim;
+                if (targetP < pmin || targetP > pmax || targetR < rmin || targetR > rmax) {
+                  this.emit({ t: 'err', s: `Target (${targetP}, ${targetR}) outside soft limits [${pmin}..${pmax}, ${rmin}..${rmax}]` });
+                  return;
+                }
+              }
+              const spd = this.stepsPerDeg();
+              const pSteps = targetP * spd;
+              const rSteps = targetR * spd;
+              this.targetJ2 = Math.round(pSteps + rSteps);
+              this.targetJ3 = Math.round(pSteps - rSteps);
+              this.mode = 'goto_g';
+              this.emit({ t: 'msg', s: `Going to Pitch ${targetP.toFixed(1)}°, Roll ${targetR.toFixed(1)}°` });
+              break;
+            }
+            case 'GC': {
+              if (tokens.length < 2) {
+                this.emit({ t: 'err', s: 'GC requires 1 arg: GC <claw_deg>' });
+                return;
+              }
+              const targetC = parseFloat(tokens[1]);
+              if (Number.isNaN(targetC) || targetC < 0 || targetC > this.cmax) {
+                this.emit({ t: 'err', s: `Claw angle must be between 0 and ${this.cmax.toFixed(1)} deg` });
+                return;
+              }
+              const targetSteps = Math.round(targetC * this.clawStepsPerDeg());
+              if (targetSteps > this.cSteps && !this.enc) {
+                this.cu = 1;
+              }
+              // When moving to 0 without encoder, overshoot by -20 deg into open stop to re-sync
+              this.targetCSteps = (targetC === 0 && !this.enc)
+                ? -Math.round(20 * this.clawStepsPerDeg())
+                : targetSteps;
+              this.clawMode = 'goto';
+              this.emit({ t: 'msg', s: `Claw moving to ${targetC.toFixed(1)}°` });
+              break;
+            }
+            case 'Z': {
+              this.j2 = 0;
+              this.j3 = 0;
+              this.v2 = 0;
+              this.v3 = 0;
+              this.mode = 'idle';
+              this.tr = 1;
+              this.emit({ t: 'msg', s: 'Pitch/Roll zeroed (0.0°, 0.0°), position trusted = true' });
+              this.emitSt();
+              break;
+            }
+            case 'ZC': {
+              this.cSteps = 0;
+              this.vc = 0;
+              this.cu = 0;
+              this.clawMode = 'idle';
+              this.emit({ t: 'msg', s: 'Claw zeroed (0.0° = fully open)' });
+              this.emitSt();
+              break;
+            }
+            case 'HC': {
+              this.targetCSteps = -Math.round(20 * this.clawStepsPerDeg());
+              this.clawMode = 'homing';
+              this.cu = 0;
+              this.emit({ t: 'msg', s: 'Homing claw toward open stop...' });
+              break;
+            }
+            case 'KC': {
+              const curC = Math.max(5.0, this.getClawDeg());
+              this.cmax = Number(curC.toFixed(1));
+              this.emit({ t: 'msg', s: `Claw close limit set to ${this.cmax}°` });
+              this.emitCfg();
+              break;
+            }
+            case 'E': {
+              if (tokens.length < 2 || (tokens[1] !== '0' && tokens[1] !== '1')) {
+                this.emit({ t: 'err', s: 'Usage: E <0|1>' });
+                return;
+              }
+              this.en = tokens[1] === '1' ? 1 : 0;
+              if (!this.en) {
+                this.tr = 0;
+                this.v2 = 0;
+                this.v3 = 0;
+                this.vc = 0;
+                this.mode = 'idle';
+                this.clawMode = 'idle';
+                this.emit({ t: 'msg', s: 'Drivers disabled (D43 HIGH) — position untrusted' });
+              } else {
+                this.emit({ t: 'msg', s: 'Drivers enabled (D43 LOW)' });
+              }
+              this.emitSt();
+              break;
+            }
+            case 'SPD': {
+              const val = parseInt(tokens[1], 10);
+              if (Number.isNaN(val) || val < 10 || val > 100) {
+                this.emit({ t: 'err', s: 'SPD must be 10..100' });
+                return;
+              }
+              this.spd = val;
+              this.emitSt();
+              break;
+            }
+            case 'CFG': {
+              if (tokens.length < 4) {
+                this.emit({ t: 'err', s: 'Usage: CFG <gear> <maxSteps> <accel>' });
+                return;
+              }
+              const gear = parseFloat(tokens[1]);
+              const maxS = parseInt(tokens[2], 10);
+              const acc = parseInt(tokens[3], 10);
+              if (Number.isNaN(gear) || gear <= 0 || Number.isNaN(maxS) || maxS <= 0 || Number.isNaN(acc) || acc <= 0) {
+                this.emit({ t: 'err', s: 'Invalid CFG values' });
+                return;
+              }
+              this.gear = gear;
+              this.maxSteps = maxS;
+              this.accel = acc;
+              this.emit({ t: 'msg', s: `Saved CFG: gear=${gear}, max=${maxS}, acc=${acc}` });
+              this.emitCfg();
+              break;
+            }
+            case 'LIM': {
+              if (tokens.length === 2 && tokens[1].toUpperCase() === 'OFF') {
+                this.lim = null;
+                this.emit({ t: 'msg', s: 'Soft limits disabled' });
+                this.emitCfg();
+                return;
+              }
+              if (tokens.length < 5) {
+                this.emit({ t: 'err', s: 'Usage: LIM <pmin> <pmax> <rmin> <rmax> or LIM OFF' });
+                return;
+              }
+              const pmin = parseFloat(tokens[1]);
+              const pmax = parseFloat(tokens[2]);
+              const rmin = parseFloat(tokens[3]);
+              const rmax = parseFloat(tokens[4]);
+              if ([pmin, pmax, rmin, rmax].some(Number.isNaN) || pmin >= pmax || rmin >= rmax) {
+                this.emit({ t: 'err', s: 'Invalid limits: min must be less than max' });
+                return;
+              }
+              this.lim = [pmin, pmax, rmin, rmax];
+              this.emit({ t: 'msg', s: `Soft limits set: P[${pmin}..${pmax}], R[${rmin}..${rmax}]` });
+              this.emitCfg();
+              break;
+            }
+            case 'LIMHERE': {
+              if (tokens.length < 2) {
+                this.emit({ t: 'err', s: 'Usage: LIMHERE <PMIN|PMAX|RMIN|RMAX>' });
+                return;
+              }
+              const which = tokens[1].toUpperCase();
+              if (!this.lim) {
+                this.lim = [-45.0, 45.0, -90.0, 90.0];
+              }
+              const curP = Number(this.getPitchDeg().toFixed(1));
+              const curR = Number(this.getRollDeg().toFixed(1));
+              if (which === 'PMIN') this.lim[0] = curP;
+              else if (which === 'PMAX') this.lim[1] = curP;
+              else if (which === 'RMIN') this.lim[2] = curR;
+              else if (which === 'RMAX') this.lim[3] = curR;
+              else {
+                this.emit({ t: 'err', s: 'Unknown LIMHERE target' });
+                return;
+              }
+              this.emit({ t: 'msg', s: `Updated ${which} to current angle` });
+              this.emitCfg();
+              break;
+            }
+            case 'INV': {
+              if (tokens.length < 3) {
+                this.emit({ t: 'err', s: 'Usage: INV <0|1> <0|1>' });
+                return;
+              }
+              this.inv = [tokens[1] === '1' ? 1 : 0, tokens[2] === '1' ? 1 : 0];
+              this.emit({ t: 'msg', s: `Motor invert set to [${this.inv[0]}, ${this.inv[1]}]` });
+              this.emitCfg();
+              break;
+            }
+            case '?': {
+              this.emitCfg();
+              this.emitSt();
+              break;
+            }
+            default: {
+              this.emit({ t: 'err', s: `Unknown command: ${line}` });
+              break;
+            }
+          }
+        }
+      }
+
+      // =========================================================================
+      // 2. UNIFIED TRANSPORT INTERFACE (Web Serial + Simulator)
+      // =========================================================================
+      class WebSerialTransport {
+        constructor(onLine, onDisconnect) {
+          this.onLine = onLine;
+          this.onDisconnect = onDisconnect;
+          this.port = null;
+          this.reader = null;
+          this.writer = null;
+          this.keepReading = false;
+          this.buffer = '';
+          // Opening the port resets the Mega. Bytes sent while its bootloader is waiting keep it
+          // in the bootloader, so nothing is sent until the sketch says hello (or 3 s pass).
+          this.ready = false;
+          this.readyTimer = null;
+          this.writeChain = Promise.resolve();
+        }
+
+        async connect() {
+          if (!('serial' in navigator)) {
+            throw new Error('Web Serial API not supported in this browser.');
+          }
+          this.port = await navigator.serial.requestPort();
+          await this.port.open({ baudRate: 115200 });
+          this.keepReading = true;
+          this.ready = false;
+          this.readyTimer = setTimeout(() => { this.ready = true; }, 3000);
+          this.port.addEventListener('disconnect', () => {
+            this.disconnect();
+          });
+          this.readLoop();
+        }
+
+        async readLoop() {
+          const decoder = new TextDecoder();
+          while (this.port && this.port.readable && this.keepReading) {
+            try {
+              this.reader = this.port.readable.getReader();
+              while (true) {
+                const { value, done } = await this.reader.read();
+                if (done) break;
+                if (value) {
+                  this.buffer += decoder.decode(value, { stream: true });
+                  let nlIdx;
+                  while ((nlIdx = this.buffer.indexOf('\n')) !== -1) {
+                    const line = this.buffer.slice(0, nlIdx).replace(/\r$/, '');
+                    this.buffer = this.buffer.slice(nlIdx + 1);
+                    if (line.includes('"hello"')) this.ready = true;
+                    if (line.length > 0 && this.onLine) {
+                      try { this.onLine(line); } catch (e) { console.error('Line handler failed:', line, e); }
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              if (this.keepReading && this.onLine) {
+                this.onLine(JSON.stringify({ t: 'err', s: 'Serial read error: ' + err.message }));
+              }
+              break;
+            } finally {
+              if (this.reader) {
+                try { this.reader.releaseLock(); } catch (_) {}
+                this.reader = null;
+              }
+            }
+          }
+          if (this.keepReading) {
+            this.keepReading = false;
+            if (this.onDisconnect) this.onDisconnect();
+          }
+        }
+
+        sendLine(line) {
+          if (!this.ready || !this.port || !this.port.writable) return Promise.resolve();
+          // One write at a time: a second getWriter() while one is held would throw
+          this.writeChain = this.writeChain.then(async () => {
+            if (!this.port || !this.port.writable) return;
+            const writer = this.port.writable.getWriter();
+            try {
+              await writer.write(new TextEncoder().encode(line + '\n'));
+            } finally {
+              writer.releaseLock();
+            }
+          }).catch((err) => console.error('Serial write failed:', err));
+          return this.writeChain;
+        }
+
+        async disconnect() {
+          this.keepReading = false;
+          clearTimeout(this.readyTimer);
+          if (this.reader) {
+            try { await this.reader.cancel(); } catch (_) {}
+          }
+          if (this.port) {
+            try { await this.port.close(); } catch (_) {}
+            this.port = null;
+          }
+          if (this.onDisconnect) this.onDisconnect();
+        }
+      }
+
+      class SimulatorTransport {
+        constructor(onLine, onDisconnect) {
+          this.onLine = onLine;
+          this.onDisconnect = onDisconnect;
+          this.board = null;
+        }
+
+        async connect() {
+          this.board = new SimulatedMegaBoard((line) => {
+            if (this.onLine) this.onLine(line);
+          });
+          this.board.start();
+        }
+
+        async sendLine(line) {
+          if (this.board) {
+            this.board.handleCommand(line);
+          }
+        }
+
+        async disconnect() {
+          if (this.board) {
+            this.board.stop();
+            this.board = null;
+          }
+          if (this.onDisconnect) this.onDisconnect();
+        }
+      }
+
+      // Export for Node testing if running outside browser DOM
+      if (typeof window === 'undefined' && typeof global !== 'undefined') {
+        global.SimulatedMegaBoard = SimulatedMegaBoard;
+        global.SimulatorTransport = SimulatorTransport;
+        return;
+      }
+
+      // =========================================================================
+      // 3. DASHBOARD APPLICATION STATE & DOM BINDINGS
+      // =========================================================================
+      const state = {
+        connected: false,
+        mode: 'none', // 'none' | 'serial' | 'sim'
+        transport: null,
+        helloFallbackTimer: null,
+        hasSentInitialQuery: false,
+
+        lastStTimeMs: 0,
+        staleAlertShown: false,
+
+        // Telemetry state from st / cfg
+        st: {
+          j2: 0, j3: 0, p: 0.0, r: 0.0, c: 0.0,
+          mv: 0, en: 0, tr: 0, spd: 50, wd: 0,
+          lim: '-----', sw: -1, enc: 0, cu: 0
+        },
+        cfg: {
+          ver: 1, gear: 1.0, max: 1200, acc: 1500,
+          lim: null, inv: [0, 0], cmax: 90.0
+        },
+
+        // Held keys & active pointer holds
+        heldKeys: new Set(),
+        shiftHeld: false,
+        pointerJog: { pitch: 0, roll: 0, claw: 0 },
+        pointerRaw: { j2: 0, j3: 0 },
+        wasJoggingV: false,
+        wasJoggingM: false
+      };
+
+      // DOM Elements
+      const el = {
+        webSerialBanner: document.getElementById('webSerialBanner'),
+        staleBanner: document.getElementById('staleBanner'),
+        untrustedBanner: document.getElementById('untrustedBanner'),
+        btnRetryPing: document.getElementById('btnRetryPing'),
+        btnBannerZero: document.getElementById('btnBannerZero'),
+
+        connBadge: document.getElementById('connBadge'),
+        connText: document.getElementById('connText'),
+        fwBadge: document.getElementById('fwBadge'),
+        btnConnect: document.getElementById('btnConnect'),
+        btnSim: document.getElementById('btnSim'),
+        btnRefresh: document.getElementById('btnRefresh'),
+        btnStopTop: document.getElementById('btnStopTop'),
+
+        movingBadge: document.getElementById('movingBadge'),
+        valPitch: document.getElementById('valPitch'),
+        valRoll: document.getElementById('valRoll'),
+        valClaw: document.getElementById('valClaw'),
+        pitchLimLabel: document.getElementById('pitchLimLabel'),
+        rollLimLabel: document.getElementById('rollLimLabel'),
+        clawLimLabel: document.getElementById('clawLimLabel'),
+
+        svgPitchLimRange: document.getElementById('svgPitchLimRange'),
+        svgPitchMinTick: document.getElementById('svgPitchMinTick'),
+        svgPitchMaxTick: document.getElementById('svgPitchMaxTick'),
+        svgPitchNeedle: document.getElementById('svgPitchNeedle'),
+
+        svgRollLimRange: document.getElementById('svgRollLimRange'),
+        svgRollMinTick: document.getElementById('svgRollMinTick'),
+        svgRollMaxTick: document.getElementById('svgRollMaxTick'),
+        svgRollNeedle: document.getElementById('svgRollNeedle'),
+
+        svgClawFill: document.getElementById('svgClawFill'),
+        svgClawNeedle: document.getElementById('svgClawNeedle'),
+        clawEstNote: document.getElementById('clawEstNote'),
+
+        valJ2: document.getElementById('valJ2'),
+        valJ3: document.getElementById('valJ3'),
+        valDrivers: document.getElementById('valDrivers'),
+        valTrusted: document.getElementById('valTrusted'),
+        valSpd: document.getElementById('valSpd'),
+        valWatchdog: document.getElementById('valWatchdog'),
+
+        limPins: [
+          document.getElementById('limD22'),
+          document.getElementById('limD24'),
+          document.getElementById('limD26'),
+          document.getElementById('limD28'),
+          document.getElementById('limD30')
+        ],
+        clawSwBadge: document.getElementById('clawSwBadge'),
+        clawEncBadge: document.getElementById('clawEncBadge'),
+
+        chkPrecision: document.getElementById('chkPrecision'),
+        btnJogStopCenter: document.getElementById('btnJogStopCenter'),
+        sliderSpeed: document.getElementById('sliderSpeed'),
+        lblSpeedSlider: document.getElementById('lblSpeedSlider'),
+        btnSpdDown: document.getElementById('btnSpdDown'),
+        btnSpdUp: document.getElementById('btnSpdUp'),
+
+        btnDriversOn: document.getElementById('btnDriversOn'),
+        btnDriversOff: document.getElementById('btnDriversOff'),
+        btnZeroTrigger: document.getElementById('btnZeroTrigger'),
+        zeroConfirmBox: document.getElementById('zeroConfirmBox'),
+        btnZeroConfirmYes: document.getElementById('btnZeroConfirmYes'),
+        btnZeroConfirmNo: document.getElementById('btnZeroConfirmNo'),
+        btnClawZero: document.getElementById('btnClawZero'),
+        btnClawHome: document.getElementById('btnClawHome'),
+        btnClawSetMax: document.getElementById('btnClawSetMax'),
+
+        inpGoPitch: document.getElementById('inpGoPitch'),
+        inpGoRoll: document.getElementById('inpGoRoll'),
+        btnGoJoints: document.getElementById('btnGoJoints'),
+        btnGoZeroPose: document.getElementById('btnGoZeroPose'),
+        inpGoClaw: document.getElementById('inpGoClaw'),
+        btnGoClaw: document.getElementById('btnGoClaw'),
+
+        limActiveStatus: document.getElementById('limActiveStatus'),
+        inpLimPMin: document.getElementById('inpLimPMin'),
+        inpLimPMax: document.getElementById('inpLimPMax'),
+        inpLimRMin: document.getElementById('inpLimRMin'),
+        inpLimRMax: document.getElementById('inpLimRMax'),
+        btnLimApply: document.getElementById('btnLimApply'),
+        btnLimOff: document.getElementById('btnLimOff'),
+
+        inpCfgGear: document.getElementById('inpCfgGear'),
+        inpCfgMax: document.getElementById('inpCfgMax'),
+        inpCfgAcc: document.getElementById('inpCfgAcc'),
+        btnCfgSave: document.getElementById('btnCfgSave'),
+        chkInvJ2: document.getElementById('chkInvJ2'),
+        chkInvJ3: document.getElementById('chkInvJ3'),
+        valCfgCmax: document.getElementById('valCfgCmax'),
+
+        chkLogTx: document.getElementById('chkLogTx'),
+        btnClearLog: document.getElementById('btnClearLog'),
+        logContainer: document.getElementById('logContainer'),
+        cmdForm: document.getElementById('cmdForm'),
+        inpManualCmd: document.getElementById('inpManualCmd')
+      };
+
+      // Check Web Serial availability
+      if (!('serial' in navigator)) {
+        el.webSerialBanner.classList.remove('hidden');
+      }
+
+      // Logging helper
+      function appendLog(text, type = 'log-msg') {
+        const div = document.createElement('div');
+        div.className = `log-line ${type}`;
+        const now = new Date();
+        const ts = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'log-time';
+        timeSpan.textContent = `[${ts}]`;
+        div.appendChild(timeSpan);
+        div.appendChild(document.createTextNode(text));
+        el.logContainer.appendChild(div);
+        while (el.logContainer.children.length > 300) {
+          el.logContainer.removeChild(el.logContainer.firstChild);
+        }
+        el.logContainer.scrollTop = el.logContainer.scrollHeight;
+      }
+
+      // Send command over active transport
+      function sendCommand(cmd) {
+        if (!state.connected || !state.transport) return;
+        const isPeriodic = cmd === 'P' || cmd.startsWith('V ') || cmd.startsWith('M ');
+        if (!isPeriodic || el.chkLogTx.checked) {
+          appendLog(`TX → ${cmd}`, 'log-tx');
+        }
+        state.transport.sendLine(cmd);
+      }
+
+      // Parse incoming serial line
+      function handleIncomingLine(line) {
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch (_) {
+          appendLog(`RAW: ${line}`, 'log-raw');
+          return;
+        }
+
+        if (!obj || typeof obj !== 'object') {
+          appendLog(`RAW: ${line}`, 'log-raw');
+          return;
+        }
+
+        switch (obj.t) {
+          case 'hello': {
+            appendLog(`Connected to ${obj.fw || 'Controller'} (protocol v${obj.ver || 1})`, 'log-msg');
+            el.fwBadge.textContent = `${obj.fw || 'FW'} v${obj.ver || 1}`;
+            el.fwBadge.classList.remove('hidden');
+            // Wait for hello or 2.5s then send '?'
+            if (!state.hasSentInitialQuery) {
+              state.hasSentInitialQuery = true;
+              if (state.helloFallbackTimer) {
+                clearTimeout(state.helloFallbackTimer);
+                state.helloFallbackTimer = null;
+              }
+              sendCommand('?');
+            }
+            break;
+          }
+          case 'st': {
+            state.lastStTimeMs = Date.now();
+            Object.assign(state.st, obj);
+            updateTelemetryUI();
+            break;
+          }
+          case 'cfg': {
+            Object.assign(state.cfg, obj);
+            updateConfigUI();
+            updateTelemetryUI();
+            break;
+          }
+          case 'msg': {
+            appendLog(`INFO: ${obj.s}`, 'log-msg');
+            break;
+          }
+          case 'err': {
+            appendLog(`ERROR: ${obj.s}`, 'log-err');
+            break;
+          }
+          default: {
+            appendLog(`JSON: ${line}`, 'log-raw');
+            break;
+          }
+        }
+      }
+
+      // Map angle to 0..300 SVG coordinates given display range [minRange, maxRange]
+      function mapAngleToSvg(angle, minRange, maxRange) {
+        const clamped = Math.max(minRange, Math.min(maxRange, angle));
+        return ((clamped - minRange) / (maxRange - minRange)) * 300;
+      }
+
+      function updateTelemetryUI() {
+        const st = state.st;
+        const cfg = state.cfg;
+
+        el.valPitch.textContent = Number(st.p).toFixed(1);
+        el.valRoll.textContent = Number(st.r).toFixed(1);
+        const clawDegClamped = Math.max(0, Number(st.c) || 0);
+        const isClawEstimate = st.cu === 1;
+        el.valClaw.textContent = (isClawEstimate ? '~' : '') + clawDegClamped.toFixed(1);
+        if (el.clawEstNote) {
+          el.clawEstNote.classList.toggle('hidden', !isClawEstimate);
+        }
+
+        el.valJ2.textContent = st.j2;
+        el.valJ3.textContent = st.j3;
+
+        // Moving indicator
+        if (st.mv) {
+          el.movingBadge.textContent = 'MOVING';
+          el.movingBadge.className = 'badge warn';
+        } else {
+          el.movingBadge.textContent = 'Idle';
+          el.movingBadge.className = 'badge ok';
+        }
+
+        // Drivers
+        el.valDrivers.textContent = st.en ? 'ON (Enabled)' : 'OFF (Limp)';
+        el.valDrivers.style.color = st.en ? 'var(--ok)' : 'var(--warn)';
+
+        // Trusted flag + banner + Go button state
+        const isTrusted = Boolean(st.tr);
+        el.valTrusted.textContent = isTrusted ? 'VERIFIED' : 'UNVERIFIED';
+        el.valTrusted.style.color = isTrusted ? 'var(--ok)' : 'var(--danger)';
+        el.untrustedBanner.classList.toggle('hidden', isTrusted);
+        el.btnGoJoints.disabled = !state.connected || !isTrusted;
+        el.btnGoZeroPose.disabled = !state.connected || !isTrusted;
+
+        // Speed
+        el.valSpd.textContent = st.spd;
+        if (document.activeElement !== el.sliderSpeed) {
+          el.sliderSpeed.value = st.spd;
+          el.lblSpeedSlider.textContent = st.spd;
+        }
+
+        // Watchdog
+        el.valWatchdog.textContent = st.wd ? 'TRIPPED!' : 'OK';
+        el.valWatchdog.style.color = st.wd ? 'var(--danger)' : 'var(--ok)';
+
+        // Limit switches D22, D24, D26, D28, D30
+        const pinNames = ['D22', 'D24', 'D26', 'D28', 'D30'];
+        const limStr = String(st.lim || '-----').padEnd(5, '-');
+        for (let i = 0; i < 5; i++) {
+          const ch = limStr[i];
+          const pill = el.limPins[i];
+          if (ch === '1') {
+            pill.textContent = `${pinNames[i]}: PRESSED`;
+            pill.className = 'sw-pill sw-pressed';
+          } else if (ch === '0') {
+            pill.textContent = `${pinNames[i]}: OK`;
+            pill.className = 'sw-pill sw-ok';
+          } else {
+            pill.textContent = `${pinNames[i]}: -`;
+            pill.className = 'sw-pill sw-none';
+          }
+        }
+
+        // Claw switch & AS5600 encoder
+        if (st.sw === -1 || st.sw === undefined) {
+          el.clawSwBadge.textContent = 'Claw SW: None';
+          el.clawSwBadge.className = 'sw-pill sw-none';
+        } else if (st.sw === 1) {
+          el.clawSwBadge.textContent = 'Claw SW: PRESSED';
+          el.clawSwBadge.className = 'sw-pill sw-pressed';
+        } else {
+          el.clawSwBadge.textContent = 'Claw SW: Open';
+          el.clawSwBadge.className = 'sw-pill sw-ok';
+        }
+
+        if (st.enc) {
+          el.clawEncBadge.textContent = 'AS5600: Active';
+          el.clawEncBadge.className = 'sw-pill sw-ok';
+        } else {
+          el.clawEncBadge.textContent = 'AS5600: None';
+          el.clawEncBadge.className = 'sw-pill sw-none';
+        }
+
+        // SVG Gauges for Pitch & Roll (-180..180 display span or expanded if needed)
+        const pSpan = 120; // -120..+120 deg gauge scale
+        const rSpan = 180; // -180..+180 deg gauge scale
+
+        const pX = mapAngleToSvg(st.p, -pSpan, pSpan);
+        el.svgPitchNeedle.setAttribute('cx', pX.toFixed(1));
+
+        const rX = mapAngleToSvg(st.r, -rSpan, rSpan);
+        el.svgRollNeedle.setAttribute('cx', rX.toFixed(1));
+
+        if (Array.isArray(cfg.lim) && cfg.lim.length === 4) {
+          const [pmin, pmax, rmin, rmax] = cfg.lim;
+          el.pitchLimLabel.textContent = `[${pmin.toFixed(1)}° .. ${pmax.toFixed(1)}°]`;
+          el.rollLimLabel.textContent = `[${rmin.toFixed(1)}° .. ${rmax.toFixed(1)}°]`;
+
+          const pMinX = mapAngleToSvg(pmin, -pSpan, pSpan);
+          const pMaxX = mapAngleToSvg(pmax, -pSpan, pSpan);
+          el.svgPitchLimRange.setAttribute('x', pMinX.toFixed(1));
+          el.svgPitchLimRange.setAttribute('width', Math.max(2, pMaxX - pMinX).toFixed(1));
+          el.svgPitchMinTick.setAttribute('x1', pMinX.toFixed(1));
+          el.svgPitchMinTick.setAttribute('x2', pMinX.toFixed(1));
+          el.svgPitchMinTick.setAttribute('visibility', 'visible');
+          el.svgPitchMaxTick.setAttribute('x1', pMaxX.toFixed(1));
+          el.svgPitchMaxTick.setAttribute('x2', pMaxX.toFixed(1));
+          el.svgPitchMaxTick.setAttribute('visibility', 'visible');
+
+          const rMinX = mapAngleToSvg(rmin, -rSpan, rSpan);
+          const rMaxX = mapAngleToSvg(rmax, -rSpan, rSpan);
+          el.svgRollLimRange.setAttribute('x', rMinX.toFixed(1));
+          el.svgRollLimRange.setAttribute('width', Math.max(2, rMaxX - rMinX).toFixed(1));
+          el.svgRollMinTick.setAttribute('x1', rMinX.toFixed(1));
+          el.svgRollMinTick.setAttribute('x2', rMinX.toFixed(1));
+          el.svgRollMinTick.setAttribute('visibility', 'visible');
+          el.svgRollMaxTick.setAttribute('x1', rMaxX.toFixed(1));
+          el.svgRollMaxTick.setAttribute('x2', rMaxX.toFixed(1));
+          el.svgRollMaxTick.setAttribute('visibility', 'visible');
+        } else {
+          el.pitchLimLabel.textContent = '[Limits: OFF]';
+          el.rollLimLabel.textContent = '[Limits: OFF]';
+          el.svgPitchLimRange.setAttribute('x', '0');
+          el.svgPitchLimRange.setAttribute('width', '300');
+          el.svgPitchMinTick.setAttribute('visibility', 'hidden');
+          el.svgPitchMaxTick.setAttribute('visibility', 'hidden');
+
+          el.svgRollLimRange.setAttribute('x', '0');
+          el.svgRollLimRange.setAttribute('width', '300');
+          el.svgRollMinTick.setAttribute('visibility', 'hidden');
+          el.svgRollMaxTick.setAttribute('visibility', 'hidden');
+        }
+
+        // Claw Gauge (0 .. cmax)
+        const cmax = Math.max(1, cfg.cmax || 90);
+        el.clawLimLabel.textContent = `[0° Open .. ${cmax.toFixed(1)}° Close]`;
+        const cX = mapAngleToSvg(clawDegClamped, 0, cmax);
+        el.svgClawNeedle.setAttribute('cx', cX.toFixed(1));
+        el.svgClawFill.setAttribute('width', cX.toFixed(1));
+      }
+
+      function updateConfigUI() {
+        const cfg = state.cfg;
+        el.inpCfgGear.value = cfg.gear;
+        el.inpCfgMax.value = cfg.max;
+        el.inpCfgAcc.value = cfg.acc;
+        el.valCfgCmax.textContent = Number(cfg.cmax || 90).toFixed(1);
+
+        if (Array.isArray(cfg.inv) && cfg.inv.length >= 2) {
+          el.chkInvJ2.checked = Boolean(cfg.inv[0]);
+          el.chkInvJ3.checked = Boolean(cfg.inv[1]);
+        }
+
+        if (Array.isArray(cfg.lim) && cfg.lim.length === 4) {
+          el.inpLimPMin.value = cfg.lim[0];
+          el.inpLimPMax.value = cfg.lim[1];
+          el.inpLimRMin.value = cfg.lim[2];
+          el.inpLimRMax.value = cfg.lim[3];
+          el.limActiveStatus.textContent = 'Limits: ACTIVE';
+          el.limActiveStatus.className = 'badge ok';
+        } else {
+          el.limActiveStatus.textContent = 'Limits: OFF';
+          el.limActiveStatus.className = 'badge';
+        }
+      }
+
+      function updateConnectionUI() {
+        if (!state.connected) {
+          el.connBadge.className = 'badge';
+          el.connText.textContent = 'Disconnected';
+          el.btnConnect.textContent = 'Connect USB Serial';
+          el.btnSim.textContent = 'Start Demo / Simulator';
+          el.btnConnect.disabled = false;
+          el.btnSim.disabled = false;
+          el.btnRefresh.disabled = true;
+          el.fwBadge.classList.add('hidden');
+          el.staleBanner.classList.add('hidden');
+        } else if (state.mode === 'serial') {
+          el.connBadge.className = 'badge ok';
+          el.connText.textContent = 'Connected (USB 115200)';
+          el.btnConnect.textContent = 'Disconnect USB';
+          el.btnSim.disabled = true;
+          el.btnRefresh.disabled = false;
+        } else if (state.mode === 'sim') {
+          el.connBadge.className = 'badge warn';
+          el.connText.textContent = 'Simulator Active';
+          el.btnSim.textContent = 'Stop Simulator';
+          el.btnConnect.disabled = true;
+          el.btnRefresh.disabled = false;
+        }
+        updateTelemetryUI();
+      }
+
+      // Connect / Disconnect handler
+      async function startConnection(mode) {
+        if (state.connected) {
+          await stopConnection();
+          return;
+        }
+
+        state.hasSentInitialQuery = false;
+        state.lastStTimeMs = Date.now();
+
+        const onDisconnect = () => {
+          if (state.helloFallbackTimer) {
+            clearTimeout(state.helloFallbackTimer);
+            state.helloFallbackTimer = null;
+          }
+          state.connected = false;
+          state.mode = 'none';
+          state.transport = null;
+          clearAllHolds(false);
+          updateConnectionUI();
+          appendLog('Disconnected.', 'log-msg');
+        };
+
+        try {
+          if (mode === 'serial') {
+            state.transport = new WebSerialTransport(handleIncomingLine, onDisconnect);
+            appendLog('Opening serial port at 115200 baud (waiting for Mega reset)...', 'log-msg');
+            await state.transport.connect();
+          } else {
+            state.transport = new SimulatorTransport(handleIncomingLine, onDisconnect);
+            appendLog('Starting built-in Mega 2560 Simulator...', 'log-msg');
+            await state.transport.connect();
+          }
+
+          state.connected = true;
+          state.mode = mode;
+          state.lastStTimeMs = Date.now();
+          updateConnectionUI();
+
+          // Requirement (1): Wait for hello line or 2.5 s (board resets), then send '?'
+          state.helloFallbackTimer = setTimeout(() => {
+            if (state.connected && !state.hasSentInitialQuery) {
+              state.hasSentInitialQuery = true;
+              sendCommand('?');
+            }
+          }, 2500);
+        } catch (err) {
+          state.transport = null;
+          state.connected = false;
+          state.mode = 'none';
+          updateConnectionUI();
+          appendLog(`Connection failed: ${err.message}`, 'log-err');
+        }
+      }
+
+      async function stopConnection() {
+        if (state.transport) {
+          const t = state.transport;
+          state.transport = null;
+          await t.disconnect();
+        }
+      }
+
+      el.btnConnect.addEventListener('click', () => startConnection('serial'));
+      el.btnSim.addEventListener('click', () => startConnection('sim'));
+      el.btnRefresh.addEventListener('click', () => sendCommand('?'));
+      el.btnRetryPing.addEventListener('click', () => sendCommand('?'));
+
+      // =========================================================================
+      // 4. KEYBOARD & POINTER HOLD-TO-MOVE LOOP (50ms V/M, 200ms P, Blur Stop)
+      // =========================================================================
+      function isTypingInInput(target) {
+        if (!target) return false;
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          const type = (target.type || '').toLowerCase();
+          // Allow global shortcuts when focused on range/checkbox, block when typing text/numbers
+          return type !== 'checkbox' && type !== 'range' && type !== 'button';
+        }
+        return Boolean(target.isContentEditable);
+      }
+
+      function setKeycapLit(code, lit) {
+        const cap = document.querySelector(`.keycap[data-keycap="${code}"]`);
+        if (cap) cap.classList.toggle('lit', lit);
+      }
+
+      function flashKeycap(code) {
+        setKeycapLit(code, true);
+        setTimeout(() => setKeycapLit(code, false), 160);
+      }
+
+      function adjustSpeedBy(delta) {
+        const cur = parseInt(el.sliderSpeed.value, 10) || state.st.spd || 50;
+        const next = Math.max(10, Math.min(100, cur + delta));
+        el.sliderSpeed.value = next;
+        el.lblSpeedSlider.textContent = next;
+        sendCommand(`SPD ${next}`);
+      }
+
+      function openZeroConfirm() {
+        el.zeroConfirmBox.classList.remove('hidden');
+      }
+
+      function closeZeroConfirm() {
+        el.zeroConfirmBox.classList.add('hidden');
+      }
+
+      function triggerEmergencyStop() {
+        clearAllHolds(false);
+        sendCommand('S');
+      }
+
+      function clearAllHolds(sendZeroV = true) {
+        state.heldKeys.clear();
+        state.shiftHeld = false;
+        state.pointerJog.pitch = 0;
+        state.pointerJog.roll = 0;
+        state.pointerJog.claw = 0;
+        state.pointerRaw.j2 = 0;
+        state.pointerRaw.j3 = 0;
+        document.querySelectorAll('.keycap.lit').forEach(c => c.classList.remove('lit'));
+        document.querySelectorAll('.active-hold').forEach(b => b.classList.remove('active-hold'));
+        if (sendZeroV && state.connected) {
+          if (state.wasJoggingV) {
+            sendCommand('V 0 0 0');
+            state.wasJoggingV = false;
+          }
+          if (state.wasJoggingM) {
+            sendCommand('M 0 0');
+            state.wasJoggingM = false;
+          }
+        } else {
+          state.wasJoggingV = false;
+          state.wasJoggingM = false;
+        }
+      }
+
+      // Keyboard events
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift') {
+          state.shiftHeld = true;
+          setKeycapLit('Shift', true);
+        }
+
+        if (isTypingInInput(e.target)) return;
+
+        const code = e.code;
+        const isQueryKey = e.key === '?';
+
+        const handledCodes = new Set([
+          'KeyW', 'KeyS', 'KeyA', 'KeyD',
+          'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+          'Space', 'KeyE', 'KeyZ', 'KeyH'
+        ]);
+
+        if (!handledCodes.has(code) && !isQueryKey) return;
+
+        e.preventDefault();
+
+        // Ignore key auto-repeat
+        if (e.repeat) return;
+
+        if (isQueryKey) {
+          flashKeycap('Question');
+          sendCommand('?');
+          return;
+        }
+
+        switch (code) {
+          case 'KeyW':
+          case 'KeyS':
+          case 'KeyA':
+          case 'KeyD':
+          case 'ArrowLeft':
+          case 'ArrowRight': {
+            state.heldKeys.add(code);
+            setKeycapLit(code, true);
+            break;
+          }
+          case 'ArrowUp': {
+            flashKeycap('ArrowUp');
+            adjustSpeedBy(10);
+            break;
+          }
+          case 'ArrowDown': {
+            flashKeycap('ArrowDown');
+            adjustSpeedBy(-10);
+            break;
+          }
+          case 'Space': {
+            flashKeycap('Space');
+            triggerEmergencyStop();
+            break;
+          }
+          case 'KeyE': {
+            flashKeycap('KeyE');
+            const nextEn = state.st.en ? 0 : 1;
+            sendCommand(`E ${nextEn}`);
+            break;
+          }
+          case 'KeyZ': {
+            flashKeycap('KeyZ');
+            openZeroConfirm();
+            break;
+          }
+          case 'KeyH': {
+            flashKeycap('KeyH');
+            sendCommand('HC');
+            break;
+          }
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift') {
+          state.shiftHeld = false;
+          setKeycapLit('Shift', false);
+        }
+        if (state.heldKeys.has(e.code)) {
+          state.heldKeys.delete(e.code);
+          setKeycapLit(e.code, false);
+        }
+      });
+
+      // Requirement (2): On window blur / visibilitychange hidden: clear held keys and send S
+      window.addEventListener('blur', () => {
+        const hadActiveMotion = state.heldKeys.size > 0 || state.wasJoggingV || state.wasJoggingM || state.st.mv;
+        clearAllHolds(false);
+        if (state.connected && hadActiveMotion) {
+          sendCommand('S');
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          clearAllHolds(false);
+          if (state.connected) {
+            sendCommand('S');
+          }
+        }
+      });
+
+      // On-screen pointer-hold buttons for Pitch/Roll/Claw (V)
+      function bindHoldButton(btn, onPress, onRelease) {
+        const release = () => {
+          if (btn.classList.contains('active-hold')) {
+            btn.classList.remove('active-hold');
+            onRelease();
+          }
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          btn.classList.add('active-hold');
+          onPress();
+        });
+        btn.addEventListener('pointerup', release);
+        btn.addEventListener('pointercancel', release);
+        btn.addEventListener('pointerleave', release);
+      }
+
+      document.querySelectorAll('[data-jog-pitch]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-jog-pitch'), 10);
+        bindHoldButton(btn, () => { state.pointerJog.pitch = dir; }, () => { if (state.pointerJog.pitch === dir) state.pointerJog.pitch = 0; });
+      });
+
+      document.querySelectorAll('[data-jog-roll]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-jog-roll'), 10);
+        bindHoldButton(btn, () => { state.pointerJog.roll = dir; }, () => { if (state.pointerJog.roll === dir) state.pointerJog.roll = 0; });
+      });
+
+      document.querySelectorAll('[data-jog-claw]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-jog-claw'), 10);
+        bindHoldButton(btn, () => { state.pointerJog.claw = dir; }, () => { if (state.pointerJog.claw === dir) state.pointerJog.claw = 0; });
+      });
+
+      // Raw motor test hold buttons (M <j2> <j3>)
+      document.querySelectorAll('[data-raw-j2]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-raw-j2'), 10);
+        bindHoldButton(btn, () => { state.pointerRaw.j2 = dir; }, () => { if (state.pointerRaw.j2 === dir) state.pointerRaw.j2 = 0; });
+      });
+
+      document.querySelectorAll('[data-raw-j3]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-raw-j3'), 10);
+        bindHoldButton(btn, () => { state.pointerRaw.j3 = dir; }, () => { if (state.pointerRaw.j3 === dir) state.pointerRaw.j3 = 0; });
+      });
+
+      // 50 ms Jog Loop & 200 ms Ping Loop + 1 s Stale Data Monitor
+      let tickCounter = 0;
+      setInterval(() => {
+        if (!state.connected) return;
+        tickCounter++;
+
+        // Stale-data check (>1000 ms since last st line)
+        const sinceSt = Date.now() - state.lastStTimeMs;
+        el.staleBanner.classList.toggle('hidden', sinceSt <= 1000);
+
+        const mag = (state.shiftHeld || el.chkPrecision.checked) ? 25 : 100;
+
+        // Check raw motor hold first
+        if (state.pointerRaw.j2 !== 0 || state.pointerRaw.j3 !== 0) {
+          const m2 = state.pointerRaw.j2 * mag;
+          const m3 = state.pointerRaw.j3 * mag;
+          sendCommand(`M ${m2} ${m3}`);
+          state.wasJoggingM = true;
+          return;
+        } else if (state.wasJoggingM) {
+          sendCommand('M 0 0');
+          state.wasJoggingM = false;
+        }
+
+        // Compute desired pitch, roll, claw directions from keyboard + pointer
+        let pDir = state.pointerJog.pitch;
+        if (state.heldKeys.has('KeyW')) pDir += 1;
+        if (state.heldKeys.has('KeyS')) pDir -= 1;
+        pDir = Math.max(-1, Math.min(1, pDir));
+
+        let rDir = state.pointerJog.roll;
+        if (state.heldKeys.has('KeyD')) rDir += 1;
+        if (state.heldKeys.has('KeyA')) rDir -= 1;
+        rDir = Math.max(-1, Math.min(1, rDir));
+
+        let cDir = state.pointerJog.claw;
+        // Left Arrow = Claw Close (+), Right Arrow = Claw Open (-)
+        if (state.heldKeys.has('ArrowLeft')) cDir += 1;
+        if (state.heldKeys.has('ArrowRight')) cDir -= 1;
+        cDir = Math.max(-1, Math.min(1, cDir));
+
+        // Visual feedback on on-screen buttons when keyboard keys held
+        document.getElementById('btnJogPitchUp').classList.toggle('active-hold', pDir > 0);
+        document.getElementById('btnJogPitchDown').classList.toggle('active-hold', pDir < 0);
+        document.getElementById('btnJogRollRight').classList.toggle('active-hold', rDir > 0);
+        document.getElementById('btnJogRollLeft').classList.toggle('active-hold', rDir < 0);
+        document.getElementById('btnJogClawClose').classList.toggle('active-hold', cDir > 0);
+        document.getElementById('btnJogClawOpen').classList.toggle('active-hold', cDir < 0);
+
+        const anyMotionHeld = (pDir !== 0 || rDir !== 0 || cDir !== 0);
+        if (anyMotionHeld) {
+          sendCommand(`V ${pDir * mag} ${rDir * mag} ${cDir * mag}`);
+          state.wasJoggingV = true;
+        } else if (state.wasJoggingV) {
+          // Released: send V 0 0 0 once
+          sendCommand('V 0 0 0');
+          state.wasJoggingV = false;
+        } else {
+          // Every 200 ms (every 4th 50ms tick), send P while connected and idle
+          if (tickCounter % 4 === 0) {
+            sendCommand('P');
+          }
+        }
+      }, 50);
+
+      // =========================================================================
+      // 5. ON-SCREEN BUTTONS & FORMS EVENT HANDLERS
+      // =========================================================================
+      el.btnStopTop.addEventListener('click', triggerEmergencyStop);
+      el.btnJogStopCenter.addEventListener('click', triggerEmergencyStop);
+
+      // Speed controls
+      el.sliderSpeed.addEventListener('input', () => {
+        el.lblSpeedSlider.textContent = el.sliderSpeed.value;
+      });
+      el.sliderSpeed.addEventListener('change', () => {
+        sendCommand(`SPD ${el.sliderSpeed.value}`);
+      });
+      el.btnSpdDown.addEventListener('click', () => adjustSpeedBy(-10));
+      el.btnSpdUp.addEventListener('click', () => adjustSpeedBy(10));
+
+      // Drivers
+      el.btnDriversOn.addEventListener('click', () => sendCommand('E 1'));
+      el.btnDriversOff.addEventListener('click', () => sendCommand('E 0'));
+
+      // Inline Zero confirmation (No browser alert/confirm)
+      el.btnZeroTrigger.addEventListener('click', openZeroConfirm);
+      el.btnBannerZero.addEventListener('click', () => {
+        openZeroConfirm();
+        el.zeroConfirmBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+      el.btnZeroConfirmYes.addEventListener('click', () => {
+        closeZeroConfirm();
+        sendCommand('Z');
+      });
+      el.btnZeroConfirmNo.addEventListener('click', closeZeroConfirm);
+
+      // Claw calibration
+      el.btnClawZero.addEventListener('click', () => sendCommand('ZC'));
+      el.btnClawHome.addEventListener('click', () => sendCommand('HC'));
+      el.btnClawSetMax.addEventListener('click', () => sendCommand('KC'));
+
+      // Go-to joints & claw
+      el.btnGoJoints.addEventListener('click', () => {
+        const p = parseFloat(el.inpGoPitch.value) || 0;
+        const r = parseFloat(el.inpGoRoll.value) || 0;
+        sendCommand(`G ${p} ${r}`);
+      });
+      el.btnGoZeroPose.addEventListener('click', () => {
+        el.inpGoPitch.value = '0';
+        el.inpGoRoll.value = '0';
+        sendCommand('G 0 0');
+      });
+      el.btnGoClaw.addEventListener('click', () => {
+        const c = parseFloat(el.inpGoClaw.value) || 0;
+        sendCommand(`GC ${c}`);
+      });
+
+      // Soft limits
+      el.btnLimApply.addEventListener('click', () => {
+        const pmin = parseFloat(el.inpLimPMin.value);
+        const pmax = parseFloat(el.inpLimPMax.value);
+        const rmin = parseFloat(el.inpLimRMin.value);
+        const rmax = parseFloat(el.inpLimRMax.value);
+        sendCommand(`LIM ${pmin} ${pmax} ${rmin} ${rmax}`);
+      });
+      el.btnLimOff.addEventListener('click', () => sendCommand('LIM OFF'));
+      document.querySelectorAll('[data-limhere]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const target = btn.getAttribute('data-limhere');
+          sendCommand(`LIMHERE ${target}`);
+        });
+      });
+
+      // Config & Invert
+      el.btnCfgSave.addEventListener('click', () => {
+        const gear = parseFloat(el.inpCfgGear.value) || 1.0;
+        const max = parseInt(el.inpCfgMax.value, 10) || 1200;
+        const acc = parseInt(el.inpCfgAcc.value, 10) || 1500;
+        sendCommand(`CFG ${gear} ${max} ${acc}`);
+      });
+
+      function sendInvertConfig() {
+        const i2 = el.chkInvJ2.checked ? 1 : 0;
+        const i3 = el.chkInvJ3.checked ? 1 : 0;
+        sendCommand(`INV ${i2} ${i3}`);
+      }
+      el.chkInvJ2.addEventListener('change', sendInvertConfig);
+      el.chkInvJ3.addEventListener('change', sendInvertConfig);
+
+      // Log clear & manual command
+      el.btnClearLog.addEventListener('click', () => {
+        el.logContainer.innerHTML = '';
+      });
+      el.cmdForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const cmd = el.inpManualCmd.value.trim();
+        if (!cmd) return;
+        sendCommand(cmd);
+        el.inpManualCmd.value = '';
+      });
+
+      // Initialize UI
+      updateConnectionUI();
+      appendLog('Dashboard ready. Click "Connect USB Serial" or "Start Demo / Simulator".', 'log-msg');
+    })();
+  </script>
+</body>
+</html>
