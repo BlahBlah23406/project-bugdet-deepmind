@@ -755,8 +755,8 @@
         <div class="gauge-item">
           <div class="gauge-top">
             <div>
-              <span class="gauge-label">Claw (C)</span>
-              <span id="clawLimLabel" class="gauge-limit-text">[0° Open .. 90° Close]</span>
+              <span class="gauge-label">Claw (0 = open)</span>
+              <span id="clawLimLabel" class="gauge-limit-text">[0° .. 90°]</span>
             </div>
             <span class="gauge-val"><span id="valClaw">0.0</span>°</span>
           </div>
@@ -765,9 +765,6 @@
             <rect id="svgClawFill" x="0" y="6" width="0" height="12" rx="6" fill="var(--ok)" opacity="0.65" />
             <circle id="svgClawNeedle" cx="0" cy="12" r="7" fill="var(--ok)" stroke="var(--panel)" stroke-width="2" />
           </svg>
-          <div id="clawEstNote" class="claw-est-note hidden" role="status">
-            Estimate: the claw may have slipped on an object. Hold → (open) to re-sync at the open stop.
-          </div>
         </div>
       </div>
 
@@ -799,17 +796,15 @@
         </div>
       </div>
 
-      <!-- Limit switches & Claw sensors -->
+      <!-- Limit switches -->
       <div class="sub-section">
-        <p class="sub-title">Limit Switches (D22..D30) &amp; Claw Sensors</p>
+        <p class="sub-title">Limit Switches (D22..D30)</p>
         <div class="switches-row">
           <span id="limD22" class="sw-pill sw-none" title="Pin D22">D22: -</span>
           <span id="limD24" class="sw-pill sw-none" title="Pin D24">D24: -</span>
           <span id="limD26" class="sw-pill sw-none" title="Pin D26">D26: -</span>
           <span id="limD28" class="sw-pill sw-none" title="Pin D28">D28: -</span>
           <span id="limD30" class="sw-pill sw-none" title="Pin D30">D30: -</span>
-          <span id="clawSwBadge" class="sw-pill sw-none" title="Claw Switch D32">Claw SW: None</span>
-          <span id="clawEncBadge" class="sw-pill sw-none" title="AS5600 Encoder 0x36">AS5600: Not detected</span>
         </div>
       </div>
     </section>
@@ -867,7 +862,6 @@
             <span class="key-hint">Right Arrow →</span>
           </button>
         </div>
-        <p style="margin:0; font-size:0.75rem; color:var(--muted);">Opening fully drives a little past 0 into the open stop to re-sync the count.</p>
       </div>
 
       <!-- Speed Slider -->
@@ -899,7 +893,7 @@
           <div class="keycap" data-keycap="Space">Space<span>STOP</span></div>
           <div class="keycap" data-keycap="KeyE">E<span>Drv</span></div>
           <div class="keycap" data-keycap="KeyZ">Z<span>Zero</span></div>
-          <div class="keycap" data-keycap="KeyH">H<span>HomeC</span></div>
+          <div class="keycap" data-keycap="KeyH">H<span>OpenC</span></div>
           <div class="keycap" data-keycap="Question">?<span>Query</span></div>
         </div>
       </div>
@@ -932,10 +926,12 @@
           </div>
         </div>
         <div class="form-row">
-          <button type="button" id="btnClawZero" title="Set current claw position as 0 (fully open)">Claw Zero (ZC)</button>
-          <button type="button" id="btnClawHome" title="Home claw (HC, Key H)">Home Claw (HC)</button>
-          <button type="button" id="btnClawSetMax" title="Set claw close limit to current angle (KC)">Set Close Limit (KC)</button>
+          <button type="button" id="btnClawHome" title="Open claw (HC, Key H)">Open claw (H)</button>
+          <button type="button" id="btnClawZero" title="Set current servo angle as open point (ZC)">Set open point here</button>
+          <button type="button" id="btnClawSetMax" title="Set claw close limit to current angle (KC)">Set close limit here</button>
+          <button type="button" id="btnClawFlipDir" title="Flip claw servo direction (CDIR)">Flip claw direction</button>
         </div>
+        <p id="clawServoInfo" style="margin:0; font-size:0.78rem; color:var(--muted);">Servo open point 150°, direction +</p>
       </div>
 
       <!-- Coordinated Go-To (G) -->
@@ -1088,7 +1084,7 @@
             </tr>
             <tr>
               <td><kbd>←</kbd> / <kbd>→</kbd></td>
-              <td>Claw Close / Open (hold). Opening fully drives a little past 0 into the open stop to re-sync the count.</td>
+              <td>Claw Close / Open (hold)</td>
               <td><kbd>Z</kbd></td>
               <td>Zero Pitch &amp; Roll (opens confirm)</td>
             </tr>
@@ -1096,7 +1092,7 @@
               <td><kbd>↑</kbd> / <kbd>↓</kbd></td>
               <td>Speed +10% / −10% (`SPD`)</td>
               <td><kbd>H</kbd></td>
-              <td>Home Claw (`HC`)</td>
+              <td>Open claw (`HC`)</td>
             </tr>
             <tr>
               <td><kbd>Shift</kbd></td>
@@ -1136,13 +1132,13 @@
       'use strict';
 
       // =========================================================================
-      // 1. SIMULATOR / FAKE MEGA 2560 BOARD (Implements PROTOCOL.md v1)
+      // 1. SIMULATOR / FAKE MEGA 2560 BOARD (Implements PROTOCOL.md v2 Servo Claw)
       // =========================================================================
       class SimulatedMegaBoard {
         constructor(onEmitLine) {
           this.onEmitLine = onEmitLine;
           this.STEPS_PER_REV = 1600; // A4988 1/8 microstep (200 * 8)
-          this.CLAW_STEPS_PER_REV = 4096; // 28BYJ-48 half-steps
+          this.CLAW_DEG_PER_SEC = 120.0; // Servo speed 120 deg/s
 
           // Persisted / Config state
           this.ver = 1;
@@ -1151,22 +1147,24 @@
           this.accel = 1500;
           this.lim = null; // [pmin, pmax, rmin, rmax] in deg or null
           this.inv = [0, 0]; // [j2_inv, j3_inv]
-          this.cmax = 90.0; // claw close limit deg
+          this.cmax = 90.0; // claw close limit deg (default 90)
+          this.copen = 150.0; // servo open point in servo degrees (default 150)
+          this.cdir = 1; // servo direction +1 or -1 (default +1)
 
           // Dynamic state
           this.j2 = 0; // float internal steps, rounded on output
           this.j3 = 0;
-          this.cSteps = 0;
+          this.cDeg = 0.0; // claw angle in degrees (0 = open, up to cmax)
           this.v2 = 0; // current velocity steps/s
           this.v3 = 0;
-          this.vc = 0;
+          this.vc = 0; // current claw velocity deg/s
 
           this.en = 1;
           this.tr = 1;
           this.spd = 50;
           this.wd = 0;
           this.limPins = '00000'; // D22..D30
-          this.sw = 0;
+          this.sw = -1;
           this.enc = 0;
           this.cu = 0;
 
@@ -1180,8 +1178,8 @@
 
           this.targetJ2 = 0;
           this.targetJ3 = 0;
-          this.clawMode = 'idle'; // 'idle' | 'jog' | 'goto' | 'homing'
-          this.targetCSteps = 0;
+          this.clawMode = 'idle'; // 'idle' | 'jog' | 'goto'
+          this.targetCDeg = 0.0;
 
           this.lastWatchdogFeedMs = Date.now();
           this.lastStepMs = Date.now();
@@ -1192,10 +1190,6 @@
 
         stepsPerDeg() {
           return (this.STEPS_PER_REV * this.gear) / 360.0;
-        }
-
-        clawStepsPerDeg() {
-          return this.CLAW_STEPS_PER_REV / 360.0;
         }
 
         getPitchDeg() {
@@ -1209,7 +1203,17 @@
         }
 
         getClawDeg() {
-          return Math.max(0, this.cSteps / this.clawStepsPerDeg());
+          return Math.max(0, Math.min(this.cmax, this.cDeg));
+        }
+
+        getServoDeg() {
+          return Math.max(0, Math.min(300, this.copen + this.cDeg * this.cdir));
+        }
+
+        clampClawDeg(c) {
+          const maxByServo = this.cdir > 0 ? (300 - this.copen) : this.copen;
+          const upper = Math.max(0, Math.min(this.cmax, maxByServo));
+          return Math.max(0, Math.min(upper, c));
         }
 
         emit(obj) {
@@ -1251,13 +1255,15 @@
             acc: Math.round(this.accel),
             lim: this.lim ? this.lim.map(v => Number(v.toFixed(1))) : null,
             inv: [this.inv[0] ? 1 : 0, this.inv[1] ? 1 : 0],
-            cmax: Number(this.cmax.toFixed(1))
+            cmax: Number(this.cmax.toFixed(1)),
+            copen: Number(this.copen.toFixed(1)),
+            cdir: this.cdir < 0 ? -1 : 1
           });
         }
 
         emitSt() {
-          const moving = (Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.vc) > 0.5 ||
-                          this.mode === 'goto_g' || this.clawMode === 'goto' || this.clawMode === 'homing') ? 1 : 0;
+          const moving = (Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.vc) > 0.1 ||
+                          this.mode === 'goto_g' || this.clawMode === 'goto') ? 1 : 0;
           this.emit({
             t: 'st',
             j2: Math.round(this.j2),
@@ -1271,9 +1277,9 @@
             spd: Math.round(this.spd),
             wd: this.wd ? 1 : 0,
             lim: this.limPins,
-            sw: this.sw,
-            enc: this.enc,
-            cu: this.cu ? 1 : 0
+            sw: -1,
+            enc: 0,
+            cu: 0
           });
         }
 
@@ -1295,15 +1301,48 @@
             this.cmdM3Pct = 0;
             this.mode = 'idle';
             this.clawMode = 'idle';
+            this.vc = 0;
             this.emit({ t: 'msg', s: 'Watchdog tripped (400ms timeout) — decelerating to stop' });
+          }
+
+          // Claw servo motion (120 deg/s * |v|/100 when jogging, 120 deg/s for GC/HC)
+          if (this.clawMode === 'jog') {
+            if (this.cmdClawPct === 0) {
+              this.vc = 0;
+              this.clawMode = 'idle';
+            } else {
+              const rate = this.CLAW_DEG_PER_SEC * (Math.abs(this.cmdClawPct) / 100.0);
+              const target = this.cmdClawPct > 0 ? this.clampClawDeg(this.cmax) : 0;
+              const rem = target - this.cDeg;
+              const step = rate * dt;
+              if (Math.abs(rem) <= step) {
+                this.cDeg = target;
+                this.vc = 0;
+              } else {
+                this.vc = Math.sign(rem) * rate;
+                this.cDeg = this.clampClawDeg(this.cDeg + this.vc * dt);
+              }
+            }
+          } else if (this.clawMode === 'goto') {
+            const target = this.clampClawDeg(this.targetCDeg);
+            const remC = target - this.cDeg;
+            const stepC = this.CLAW_DEG_PER_SEC * dt;
+            if (Math.abs(remC) <= stepC) {
+              this.cDeg = target;
+              this.vc = 0;
+              this.clawMode = 'idle';
+            } else {
+              this.vc = Math.sign(remC) * this.CLAW_DEG_PER_SEC;
+              this.cDeg = this.clampClawDeg(this.cDeg + this.vc * dt);
+            }
+          } else {
+            this.vc = 0;
           }
 
           if (!this.en) {
             this.v2 = 0;
             this.v3 = 0;
-            this.vc = 0;
             this.mode = 'idle';
-            this.clawMode = 'idle';
             return;
           }
 
@@ -1406,56 +1445,6 @@
               this.j3 = ps - rs;
             }
           }
-
-          // Claw motion (28BYJ-48, ~600 half-steps/s max)
-          const clawMaxStepsPerSec = 600 * (this.spd / 100.0);
-          const maxClawSteps = this.cmax * this.clawStepsPerDeg();
-          const openOvershootSteps = -Math.round(20 * this.clawStepsPerDeg());
-          if (this.clawMode === 'jog') {
-            this.vc = (this.cmdClawPct / 100.0) * clawMaxStepsPerSec;
-            if (this.vc > 0 && !this.enc) {
-              this.cu = 1;
-            }
-            this.cSteps += this.vc * dt;
-            if (this.vc < 0 && this.cSteps <= 0) {
-              this.cu = 0;
-            }
-            if (this.cSteps <= openOvershootSteps) {
-              this.cSteps = 0;
-              this.cu = 0;
-              if (this.vc < 0) this.vc = 0;
-            }
-            if (this.cSteps >= maxClawSteps) { this.cSteps = maxClawSteps; if (this.vc > 0) this.vc = 0; }
-          } else if (this.clawMode === 'goto' || this.clawMode === 'homing') {
-            const remC = this.targetCSteps - this.cSteps;
-            const stepC = clawMaxStepsPerSec * dt;
-            if (remC > 0 && !this.enc) {
-              this.cu = 1;
-            }
-            if (Math.abs(remC) <= stepC) {
-              this.cSteps = this.targetCSteps;
-              this.vc = 0;
-              if (this.cSteps <= 0) {
-                this.cSteps = 0;
-                this.cu = 0;
-              }
-              if (this.clawMode === 'homing') {
-                this.cSteps = 0;
-                this.cu = 0;
-                this.emit({ t: 'msg', s: 'Claw homing complete (position reset to 0)' });
-              }
-              this.clawMode = 'idle';
-            } else {
-              this.vc = Math.sign(remC) * clawMaxStepsPerSec;
-              this.cSteps += this.vc * dt;
-              if (this.vc < 0 && this.cSteps <= 0) {
-                this.cu = 0;
-              }
-            }
-          } else {
-            if (this.cSteps < 0) this.cSteps = 0;
-            this.vc = 0;
-          }
         }
 
         handleCommand(rawLine) {
@@ -1482,14 +1471,13 @@
               this.cmdPitchPct = Math.max(-100, Math.min(100, p));
               this.cmdRollPct = Math.max(-100, Math.min(100, r));
               this.cmdClawPct = Math.max(-100, Math.min(100, c));
-              if (this.cmdClawPct > 0 && !this.enc) {
-                this.cu = 1;
-              } else if (this.cmdClawPct === 0 && this.cSteps < 0) {
-                this.cSteps = 0;
-                this.cu = 0;
-              }
               this.mode = 'jog_v';
-              this.clawMode = this.cmdClawPct !== 0 ? 'jog' : 'idle';
+              if (this.cmdClawPct !== 0) {
+                this.clawMode = 'jog';
+              } else {
+                this.clawMode = 'idle';
+                this.vc = 0;
+              }
               break;
             }
             case 'M': {
@@ -1571,16 +1559,9 @@
                 this.emit({ t: 'err', s: `Claw angle must be between 0 and ${this.cmax.toFixed(1)} deg` });
                 return;
               }
-              const targetSteps = Math.round(targetC * this.clawStepsPerDeg());
-              if (targetSteps > this.cSteps && !this.enc) {
-                this.cu = 1;
-              }
-              // When moving to 0 without encoder, overshoot by -20 deg into open stop to re-sync
-              this.targetCSteps = (targetC === 0 && !this.enc)
-                ? -Math.round(20 * this.clawStepsPerDeg())
-                : targetSteps;
+              this.targetCDeg = this.clampClawDeg(targetC);
               this.clawMode = 'goto';
-              this.emit({ t: 'msg', s: `Claw moving to ${targetC.toFixed(1)}°` });
+              this.emit({ t: 'msg', s: `Claw moving to ${this.targetCDeg.toFixed(1)}°` });
               break;
             }
             case 'Z': {
@@ -1595,26 +1576,38 @@
               break;
             }
             case 'ZC': {
-              this.cSteps = 0;
+              const curServo = this.getServoDeg();
+              this.copen = Number(curServo.toFixed(1));
+              this.cDeg = 0;
+              this.targetCDeg = 0;
               this.vc = 0;
-              this.cu = 0;
               this.clawMode = 'idle';
-              this.emit({ t: 'msg', s: 'Claw zeroed (0.0° = fully open)' });
+              this.emit({ t: 'msg', s: `Claw open point set here (servo ${this.copen}°, c = 0.0°)` });
+              this.emitCfg();
               this.emitSt();
               break;
             }
             case 'HC': {
-              this.targetCSteps = -Math.round(20 * this.clawStepsPerDeg());
-              this.clawMode = 'homing';
-              this.cu = 0;
-              this.emit({ t: 'msg', s: 'Homing claw toward open stop...' });
+              this.targetCDeg = 0;
+              this.clawMode = 'goto';
+              this.emit({ t: 'msg', s: 'Opening claw to 0.0°' });
               break;
             }
             case 'KC': {
-              const curC = Math.max(5.0, this.getClawDeg());
+              const curC = this.getClawDeg();
               this.cmax = Number(curC.toFixed(1));
               this.emit({ t: 'msg', s: `Claw close limit set to ${this.cmax}°` });
               this.emitCfg();
+              this.emitSt();
+              break;
+            }
+            case 'CDIR': {
+              this.cdir = this.cdir < 0 ? 1 : -1;
+              this.cDeg = this.clampClawDeg(this.cDeg);
+              this.targetCDeg = this.clampClawDeg(this.targetCDeg);
+              this.emit({ t: 'msg', s: `Claw direction flipped to ${this.cdir > 0 ? '+' : '-'}` });
+              this.emitCfg();
+              this.emitSt();
               break;
             }
             case 'E': {
@@ -1895,7 +1888,7 @@
         },
         cfg: {
           ver: 1, gear: 1.0, max: 1200, acc: 1500,
-          lim: null, inv: [0, 0], cmax: 90.0
+          lim: null, inv: [0, 0], cmax: 90.0, copen: 150, cdir: 1
         },
 
         // Held keys & active pointer holds
@@ -1943,7 +1936,6 @@
 
         svgClawFill: document.getElementById('svgClawFill'),
         svgClawNeedle: document.getElementById('svgClawNeedle'),
-        clawEstNote: document.getElementById('clawEstNote'),
 
         valJ2: document.getElementById('valJ2'),
         valJ3: document.getElementById('valJ3'),
@@ -1959,8 +1951,6 @@
           document.getElementById('limD28'),
           document.getElementById('limD30')
         ],
-        clawSwBadge: document.getElementById('clawSwBadge'),
-        clawEncBadge: document.getElementById('clawEncBadge'),
 
         chkPrecision: document.getElementById('chkPrecision'),
         btnJogStopCenter: document.getElementById('btnJogStopCenter'),
@@ -1978,6 +1968,8 @@
         btnClawZero: document.getElementById('btnClawZero'),
         btnClawHome: document.getElementById('btnClawHome'),
         btnClawSetMax: document.getElementById('btnClawSetMax'),
+        btnClawFlipDir: document.getElementById('btnClawFlipDir'),
+        clawServoInfo: document.getElementById('clawServoInfo'),
 
         inpGoPitch: document.getElementById('inpGoPitch'),
         inpGoRoll: document.getElementById('inpGoRoll'),
@@ -2113,11 +2105,7 @@
         el.valPitch.textContent = Number(st.p).toFixed(1);
         el.valRoll.textContent = Number(st.r).toFixed(1);
         const clawDegClamped = Math.max(0, Number(st.c) || 0);
-        const isClawEstimate = st.cu === 1;
-        el.valClaw.textContent = (isClawEstimate ? '~' : '') + clawDegClamped.toFixed(1);
-        if (el.clawEstNote) {
-          el.clawEstNote.classList.toggle('hidden', !isClawEstimate);
-        }
+        el.valClaw.textContent = clawDegClamped.toFixed(1);
 
         el.valJ2.textContent = st.j2;
         el.valJ3.textContent = st.j3;
@@ -2172,26 +2160,6 @@
           }
         }
 
-        // Claw switch & AS5600 encoder
-        if (st.sw === -1 || st.sw === undefined) {
-          el.clawSwBadge.textContent = 'Claw SW: None';
-          el.clawSwBadge.className = 'sw-pill sw-none';
-        } else if (st.sw === 1) {
-          el.clawSwBadge.textContent = 'Claw SW: PRESSED';
-          el.clawSwBadge.className = 'sw-pill sw-pressed';
-        } else {
-          el.clawSwBadge.textContent = 'Claw SW: Open';
-          el.clawSwBadge.className = 'sw-pill sw-ok';
-        }
-
-        if (st.enc) {
-          el.clawEncBadge.textContent = 'AS5600: Active';
-          el.clawEncBadge.className = 'sw-pill sw-ok';
-        } else {
-          el.clawEncBadge.textContent = 'AS5600: None';
-          el.clawEncBadge.className = 'sw-pill sw-none';
-        }
-
         // SVG Gauges for Pitch & Roll (-180..180 display span or expanded if needed)
         const pSpan = 120; // -120..+120 deg gauge scale
         const rSpan = 180; // -180..+180 deg gauge scale
@@ -2244,7 +2212,7 @@
 
         // Claw Gauge (0 .. cmax)
         const cmax = Math.max(1, cfg.cmax || 90);
-        el.clawLimLabel.textContent = `[0° Open .. ${cmax.toFixed(1)}° Close]`;
+        el.clawLimLabel.textContent = `[0° .. ${cmax.toFixed(1)}°]`;
         const cX = mapAngleToSvg(clawDegClamped, 0, cmax);
         el.svgClawNeedle.setAttribute('cx', cX.toFixed(1));
         el.svgClawFill.setAttribute('width', cX.toFixed(1));
@@ -2256,6 +2224,11 @@
         el.inpCfgMax.value = cfg.max;
         el.inpCfgAcc.value = cfg.acc;
         el.valCfgCmax.textContent = Number(cfg.cmax || 90).toFixed(1);
+        const copen = cfg.copen !== undefined ? Number(cfg.copen) : 150;
+        const cdirSign = (cfg.cdir !== undefined && Number(cfg.cdir) < 0) ? '-' : '+';
+        if (el.clawServoInfo) {
+          el.clawServoInfo.textContent = `Servo open point ${copen}°, direction ${cdirSign}`;
+        }
 
         if (Array.isArray(cfg.inv) && cfg.inv.length >= 2) {
           el.chkInvJ2.checked = Boolean(cfg.inv[0]);
@@ -2690,6 +2663,7 @@
       el.btnClawZero.addEventListener('click', () => sendCommand('ZC'));
       el.btnClawHome.addEventListener('click', () => sendCommand('HC'));
       el.btnClawSetMax.addEventListener('click', () => sendCommand('KC'));
+      el.btnClawFlipDir.addEventListener('click', () => sendCommand('CDIR'));
 
       // Go-to joints & claw
       el.btnGoJoints.addEventListener('click', () => {

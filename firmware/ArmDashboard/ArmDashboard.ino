@@ -1,47 +1,43 @@
 // Mega differential arm and claw. USB lines follow PROTOCOL.md, version 1.
 #include <AccelStepper.h>
-#include <Wire.h>
+#include <Servo.h>
 #include <EEPROM.h>
 #include <avr/eeprom.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 
-const byte EN_PIN = 43, CLAW_SWITCH_PIN = 32;
+const byte EN_PIN = 43, CLAW_SERVO_PIN = 11;  // Servo signal on J27 IN4
 const byte limitPins[5] = {22, 24, 26, 28, 30};
-const float CLAW_STEPS_PER_DEG = 4096.0f / 360.0f;
-const float CLAW_SPEED = 600, CLAW_CLOSE_SPEED = 400, CLAW_HOME_SPEED = 300, CLAW_ACCEL = 3000;
-const long HOME_OVERSHOOT = 20 * CLAW_STEPS_PER_DEG;
-const long NEAR_OPEN = 30 * CLAW_STEPS_PER_DEG;
+const int CLAW_MIN_US = 500, CLAW_MAX_US = 2500;
+const float CLAW_RANGE = 300.0f, CLAW_SPEED = 120.0f;
+const unsigned long CLAW_INTERVAL_MS = 10;
 const long FAR_TARGET = 1000000000L;
 const unsigned long MAGIC = 0x41524D31UL;
-const uint16_t VERSION = 1;
+const uint16_t VERSION = 2;
 const byte VALID_MARK = 0xA5;
 
 AccelStepper j2(AccelStepper::DRIVER, 27, 29);
 AccelStepper j3(AccelStepper::DRIVER, 31, 33);
-AccelStepper claw(AccelStepper::HALF4WIRE, 11, 9, 10, 8);
+Servo clawServo;
 
 struct Saved {
   unsigned long magic;
   uint16_t version;
   float gear, maxSteps, accel;
   float limits[4];
-  long pos2, pos3, posC, closeLimit;
+  long pos2, pos3;
+  float clawPos, open, closeLimit;
+  int8_t dir;
   byte speedPercent, limitsOn, inv2, inv3, trusted, enabled;
 };
 Saved cfg, snapshot;
 bool driversOn = true, trusted = false;
 bool fitted[5], switchFault = false;
-bool useSwitch = false, hasEncoder = false, clawUncertain = false;
-bool clawMoving = false, clawHoming = false, clawJogging = false;
-int clawVelocity = 0, pendingClawVelocity = 0;
-bool clawJogPending = false;
-int encSign = 1, lastRaw = 0;
-bool encSignKnown = false;
-long encCounts = 0, encOrigin = 0, chkCmd = 0, chkEnc = 0;
-unsigned long lastEncRead = 0, lastStallCheck = 0;
+float clawPos = 0, clawTarget = 0, clawRate = 0;
+bool clawJogging = false;
+int clawPulse = 0;
+unsigned long lastClawUpdate = 0;
 unsigned long lastFeed = 0, lastStatus = 0, idleSince = 0;
 bool watchdogTripped = false, jogging = false, pending = false;
 float wanted2 = 0, wanted3 = 0;
@@ -113,7 +109,7 @@ float stepsPerDegree() { return 1600.0f * cfg.gear / 360.0f; }
 float pitchSteps() { return j2.currentPosition() * 0.5f + j3.currentPosition() * 0.5f; }
 float rollSteps() { return j2.currentPosition() * 0.5f - j3.currentPosition() * 0.5f; }
 bool armMoving() { return j2.isRunning() || j3.isRunning(); }
-bool moving() { return armMoving() || clawMoving || clawJogPending || pending; }
+bool moving() { return armMoving() || clawPos != clawTarget || pending; }
 
 void printConfig() {
   JsonLine out;
@@ -127,7 +123,9 @@ void printConfig() {
     out.print(']');
   } else out.print(F("null"));
   out.print(F(",\"inv\":[")); out.print(cfg.inv2); out.print(','); out.print(cfg.inv3);
-  out.print(F("],\"cmax\":")); out.number(cfg.closeLimit / CLAW_STEPS_PER_DEG, 1);
+  out.print(F("],\"cmax\":")); out.number(cfg.closeLimit, 1);
+  out.print(F(",\"copen\":")); out.number(cfg.open, 1);
+  out.print(F(",\"cdir\":")); out.print((int)cfg.dir);
   out.print('}'); queueLine(out);
 }
 
@@ -137,7 +135,7 @@ void printStatus() {
   out.print(F(",\"j3\":")); out.print(j3.currentPosition());
   out.print(F(",\"p\":")); out.number(pitchSteps() / stepsPerDegree(), 1);
   out.print(F(",\"r\":")); out.number(rollSteps() / stepsPerDegree(), 1);
-  out.print(F(",\"c\":")); out.number(max(0L, claw.currentPosition()) / CLAW_STEPS_PER_DEG, 1);
+  out.print(F(",\"c\":")); out.print(clawPos, 1);
   out.print(F(",\"mv\":")); out.print(moving() ? 1 : 0);
   out.print(F(",\"en\":")); out.print(driversOn ? 1 : 0);
   out.print(F(",\"tr\":")); out.print(trusted ? 1 : 0);
@@ -145,10 +143,7 @@ void printStatus() {
   out.print(F(",\"wd\":")); out.print(watchdogTripped ? 1 : 0);
   out.print(F(",\"lim\":\""));
   for (byte i = 0; i < 5; ++i) out.print(!fitted[i] ? '-' : (digitalRead(limitPins[i]) == HIGH ? '1' : '0'));
-  out.print(F("\",\"sw\":")); out.print(useSwitch ? (digitalRead(CLAW_SWITCH_PIN) == LOW ? 1 : 0) : -1);
-  out.print(F(",\"enc\":")); out.print(hasEncoder ? 1 : 0);
-  out.print(F(",\"cu\":")); out.print(clawUncertain ? 1 : 0);
-  out.print('}'); queueLine(out);
+  out.print(F("\",\"sw\":-1,\"enc\":0,\"cu\":0}")); queueLine(out);
 }
 
 // Invalidate before any step. A reset during a move must not trust an old count.
@@ -179,7 +174,7 @@ void defaults() {
   cfg.magic = MAGIC; cfg.version = VERSION;
   cfg.gear = 1; cfg.maxSteps = 1200; cfg.accel = 1500;
   cfg.speedPercent = 50;
-  cfg.closeLimit = 180 * CLAW_STEPS_PER_DEG;
+  cfg.open = 150.0f; cfg.dir = 1; cfg.closeLimit = 90.0f;
 }
 
 bool goodConfig() {
@@ -187,7 +182,10 @@ bool goodConfig() {
   if (!isfinite(cfg.gear) || cfg.gear <= 0 || !isfinite(1600.0f * cfg.gear / 360.0f) || 1600.0f * cfg.gear / 360.0f <= 0) return false;
   if (!isfinite(cfg.maxSteps) || cfg.maxSteps <= 0) return false;
   if (!isfinite(cfg.accel) || cfg.accel <= 0) return false;
-  if (cfg.speedPercent < 10 || cfg.speedPercent > 100 || cfg.closeLimit < 0 || cfg.closeLimit > FAR_TARGET) return false;
+  if (cfg.speedPercent < 10 || cfg.speedPercent > 100) return false;
+  if (!isfinite(cfg.open) || cfg.open < 0 || cfg.open > CLAW_RANGE || (cfg.dir != 1 && cfg.dir != -1)) return false;
+  if (!isfinite(cfg.closeLimit) || cfg.closeLimit <= 0 || cfg.closeLimit > CLAW_RANGE) return false;
+  if (!isfinite(cfg.clawPos) || cfg.clawPos < 0 || cfg.clawPos > cfg.closeLimit) return false;
   for (byte i = 0; i < 4; ++i) if (!isfinite(cfg.limits[i])) return false;
   return cfg.limits[0] <= cfg.limits[1] && cfg.limits[2] <= cfg.limits[3];
 }
@@ -198,7 +196,7 @@ void persistLoop() {
   if (!saveActive) {
     snapshot = cfg;
     snapshot.pos2 = j2.currentPosition(); snapshot.pos3 = j3.currentPosition();
-    snapshot.posC = claw.currentPosition();
+    snapshot.clawPos = clawPos;
     snapshot.trusted = trusted; snapshot.enabled = driversOn;
     saveIndex = 0; saveActive = true;
   }
@@ -215,12 +213,8 @@ void persistLoop() {
 }
 
 void stopClaw() {
-  if (claw.currentPosition() < 0) {
-    changed(); claw.setCurrentPosition(0); encCounts = encOrigin = 0; clawUncertain = false;
-  } else claw.setCurrentPosition(claw.currentPosition());
-  claw.disableOutputs(); claw.setMaxSpeed(CLAW_SPEED);
-  clawMoving = false; clawHoming = false; clawJogging = false;
-  clawVelocity = 0; clawJogPending = false;
+  clawTarget = clawPos;
+  clawJogging = false;
 }
 
 void stopArm(bool quick) {
@@ -237,21 +231,10 @@ void stopArm(bool quick) {
   if (v3 > 0) j3.stop(); else j3.moveTo(j3.currentPosition());
 }
 
-void rampClawStop() {
-  clawJogging = false; clawVelocity = 0; clawJogPending = false;
-  if (claw.currentPosition() < 0) { stopClaw(); return; }
-  if (claw.speed() != 0) {
-    claw.stop();
-    // A stop should still respect the normal claw travel.
-    if (!clawHoming) claw.moveTo(constrain(claw.targetPosition(), 0L, cfg.closeLimit));
-    clawHoming = false;
-  } else stopClaw();
-}
-
 void stopAll(bool quick) {
   jogging = false; gotoActive = false; wanted2 = wanted3 = 0;
   stopArm(quick);
-  if (quick) stopClaw(); else rampClawStop();
+  stopClaw();
 }
 
 bool switchBlocked() {
@@ -357,116 +340,46 @@ void armLoop() {
   }
 }
 
-// AS5600 support matches the working claw sketch.
-int as5600Read(byte reg, byte count) {
-  Wire.beginTransmission(0x36); Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return -1;
-  if (Wire.requestFrom((byte)0x36, count) != count) return -1;
-  int value = 0;
-  for (byte i = 0; i < count; ++i) value = (value << 8) | Wire.read();
-  return value;
+float clawServoAngle() {
+  return constrain(cfg.open + clawPos * cfg.dir, 0.0f, CLAW_RANGE);
 }
 
-long encSteps() { return encCounts; }
-void updateEncoder() {
-  int raw = as5600Read(0x0C, 2);
-  if (raw < 0) return;
-  raw &= 0x0FFF;
-  int delta = raw - lastRaw;
-  if (delta > 2048) delta -= 4096;
-  if (delta < -2048) delta += 4096;
-  lastRaw = raw; encCounts += (long)delta * encSign;
+int clawMicroseconds() {
+  return lroundf(CLAW_MIN_US + clawServoAngle() * (CLAW_MAX_US - CLAW_MIN_US) / CLAW_RANGE);
 }
-void startStallWindow() {
-  lastStallCheck = millis(); chkCmd = claw.currentPosition(); chkEnc = encSteps();
+
+void moveClaw(float target, float rate, bool jog) {
+  if (target == clawPos) { stopClaw(); return; }
+  if (clawPos == clawTarget) changed();
+  if (target != clawTarget || rate != clawRate || jog != clawJogging) lastClawUpdate = millis();
+  clawTarget = target;
+  clawRate = rate;
+  clawJogging = jog;
 }
-bool stalled() {
-  if (millis() - lastStallCheck < 100) return false;
-  long cmd = claw.currentPosition() - chkCmd, act = encSteps() - chkEnc;
-  if (!encSignKnown && labs(cmd) >= 40 && labs(act) > labs(cmd) / 2) {
-    if ((act > 0) != (cmd > 0)) {
-      encSign = -encSign;
-      encCounts = 2 * encOrigin - encCounts;
-      message(F("Claw encoder direction learned"));
-    }
-    encSignKnown = true;
-  }
-  startStallWindow();
-  return labs(cmd) >= 20 && labs(act) < labs(cmd) / 4;
-}
-void zeroClaw(const __FlashStringHelper *why) {
-  changed(); stopClaw(); claw.setCurrentPosition(0); encCounts = encOrigin = 0;
-  clawUncertain = false;
-  message(why);
-}
-void moveClaw(long target, float speed) {
-  if (!clawMoving) startStallWindow();
-  if (!hasEncoder && target > claw.currentPosition()) clawUncertain = true;
-  changed(); claw.enableOutputs(); claw.setMaxSpeed(speed); claw.moveTo(target);
-  clawMoving = claw.isRunning();
-}
-void homeClaw() {
-  changed(); stopClaw();
-  if (useSwitch && digitalRead(CLAW_SWITCH_PIN) == LOW) { zeroClaw(F("Claw open: switch")); return; }
-  long travel = (useSwitch || hasEncoder) ? cfg.closeLimit + 30 * CLAW_STEPS_PER_DEG
-                                         : max(claw.currentPosition(), 0L) + HOME_OVERSHOOT;
-  moveClaw(claw.currentPosition() - travel, CLAW_HOME_SPEED);
-  clawHoming = true;
-  message(F("Claw homing"));
-}
+
 void jogClaw(int velocity) {
-  if (clawHoming) return;
-  if (clawJogPending && velocity == pendingClawVelocity) return;
-  if (!clawJogPending && clawJogging && velocity == clawVelocity) return;
-  if (!velocity) { if (clawMoving || clawJogPending) rampClawStop(); return; }
-  if (clawMoving) {
-    rampClawStop();
-    pendingClawVelocity = velocity; clawJogPending = true; clawJogging = true;
-    return;
-  }
-  clawJogPending = false;
-  clawVelocity = velocity;
-  float base = velocity > 0 ? CLAW_CLOSE_SPEED : (claw.currentPosition() <= 0 ? CLAW_HOME_SPEED : CLAW_SPEED);
-  moveClaw(velocity > 0 ? cfg.closeLimit : -HOME_OVERSHOOT, base * abs(velocity) / 100.0f);
-  clawJogging = true;
+  if (velocity == 0) { stopClaw(); return; }
+  moveClaw(velocity > 0 ? cfg.closeLimit : 0.0f, CLAW_SPEED * abs(velocity) / 100.0f, true);
 }
+
 void clawLoop() {
-  if (hasEncoder && millis() - lastEncRead >= 20) { lastEncRead = millis(); updateEncoder(); }
-  if (!clawMoving) {
-    if (clawJogPending) { int velocity = pendingClawVelocity; clawJogPending = false; jogClaw(velocity); }
-    return;
+  if (clawPos == clawTarget) return;
+  unsigned long now = millis();
+  unsigned long elapsed = now - lastClawUpdate;
+  if (elapsed < CLAW_INTERVAL_MS) return;
+  lastClawUpdate = now;
+  float travel = clawRate * (elapsed / 1000.0f);
+  float remaining = clawTarget - clawPos;
+  if (fabs(remaining) <= travel) {
+    clawPos = clawTarget;
+    clawJogging = false;
+  } else {
+    clawPos += remaining > 0 ? travel : -travel;
   }
-  bool opening = claw.distanceToGo() < 0 || claw.speed() < 0;
-  // Slow down for the open-stop overshoot once past zero.
-  if (opening && claw.targetPosition() < 0 && claw.currentPosition() <= 0 && claw.maxSpeed() > CLAW_HOME_SPEED) {
-    claw.setMaxSpeed(CLAW_HOME_SPEED);
-  }
-  if (useSwitch && opening && digitalRead(CLAW_SWITCH_PIN) == LOW) { zeroClaw(F("Claw open: switch")); return; }
-  if (hasEncoder && stalled()) {
-    if (opening && (clawHoming || claw.currentPosition() < NEAR_OPEN)) zeroClaw(F("Claw open: encoder stop"));
-    else {
-      changed(); stopClaw(); claw.setCurrentPosition(encSteps());
-      message(opening ? F("Claw blocked while opening") : F("Claw stalled: gripping"), true);
-    }
-    return;
-  }
-  if (!claw.isRunning()) {
-    if (clawHoming) {
-      zeroClaw((useSwitch || hasEncoder) ? F("Claw home travel ended; no stop found")
-                                        : F("Claw open: hard stop"));
-      return;
-    }
-    if (claw.currentPosition() < 0 || claw.targetPosition() < 0) {
-      zeroClaw(F("Claw open: hard stop"));
-      return;
-    }
-    bool restart = clawJogPending;
-    int velocity = pendingClawVelocity;
-    stopClaw();
-    if (hasEncoder && labs(encSteps() - claw.currentPosition()) > 8) {
-      changed(); claw.setCurrentPosition(encSteps());
-    }
-    if (restart) jogClaw(velocity);
+  int pulse = clawMicroseconds();
+  if (pulse != clawPulse) {
+    clawServo.writeMicroseconds(pulse);
+    clawPulse = pulse;
   }
 }
 
@@ -552,20 +465,22 @@ void command() {
     stopArm(false); jogging = false; wanted2 = wanted3 = 0;
     pendingGoto = true; gotoActive = true; pending = true; changed();
   } else if (!strcmp(cmd, "GC") && count == 2 && number(tokens[1], a)) {
-    if (a < 0 || a * CLAW_STEPS_PER_DEG > cfg.closeLimit) { message(F("Claw target outside limits"), true); return; }
-    stopClaw();
-    long target = a <= 0.5f ? -HOME_OVERSHOOT : lround(a * CLAW_STEPS_PER_DEG);
-    float speed = target > claw.currentPosition() ? CLAW_CLOSE_SPEED
-                : (target < 0 && claw.currentPosition() <= 0 ? CLAW_HOME_SPEED : CLAW_SPEED);
-    moveClaw(target, speed);
+    if (a < 0 || a > cfg.closeLimit) { message(F("Claw target outside limits"), true); return; }
+    moveClaw(a, CLAW_SPEED, false);
   } else if (!strcmp(cmd, "HC") && count == 1) {
-    homeClaw();
+    moveClaw(0, CLAW_SPEED, false);
   } else if (!strcmp(cmd, "ZC") && count == 1) {
-    zeroClaw(F("Claw zero marked"));
+    cfg.open = clawServoAngle();
+    clawPos = 0; stopClaw(); configChanged();
+    message(F("Claw zero marked"));
   } else if (!strcmp(cmd, "KC") && count == 1) {
+    if (clawPos <= 0) { message(F("Claw close limit must be positive"), true); return; }
     stopClaw();
-    if (claw.currentPosition() < 0) { message(F("Claw close limit must be nonnegative"), true); return; }
-    cfg.closeLimit = claw.currentPosition(); configChanged();
+    cfg.closeLimit = clawPos; configChanged();
+  } else if (!strcmp(cmd, "CDIR") && count == 1) {
+    if (clawPos != 0) { message(F("Open the claw first"), true); return; }
+    stopClaw();
+    cfg.dir = -cfg.dir; configChanged();
   } else if (!strcmp(cmd, "Z") && count == 1) {
     if (!requireIdle()) return;
     changed(); j2.setCurrentPosition(0); j3.setCurrentPosition(0); trusted = true;
@@ -648,23 +563,19 @@ void setup() {
   else savedValid = valid == VALID_MARK;
   trusted = savedValid && cfg.trusted && cfg.enabled;
   j2.setCurrentPosition(cfg.pos2); j3.setCurrentPosition(cfg.pos3);
-  claw.setCurrentPosition(cfg.posC); encCounts = encOrigin = cfg.posC;
   j2.setPinsInverted(cfg.inv2, false, false); j3.setPinsInverted(cfg.inv3, false, false);
   j2.setAcceleration(cfg.accel); j3.setAcceleration(cfg.accel);
   j2.setMaxSpeed(cfg.maxSteps * cfg.speedPercent / 100.0f);
   j3.setMaxSpeed(cfg.maxSteps * cfg.speedPercent / 100.0f);
-  claw.setAcceleration(CLAW_ACCEL); stopClaw();
   for (byte i = 0; i < 5; ++i) pinMode(limitPins[i], INPUT_PULLUP);
-  pinMode(CLAW_SWITCH_PIN, INPUT_PULLUP);
-  Wire.begin(); Wire.setClock(400000); Wire.setWireTimeout(3000, true);
-  // The I2C probe also gives the input pullups time to settle, without delay().
-  int status = as5600Read(0x0B, 1);
-  if (status >= 0 && (status & 0x20)) {
-    int raw = as5600Read(0x0C, 2);
-    if (raw >= 0) { hasEncoder = true; lastRaw = raw & 0x0FFF; }
-  }
-  useSwitch = digitalRead(CLAW_SWITCH_PIN) == LOW;
-  clawUncertain = !hasEncoder && claw.currentPosition() > 0;
+  clawPos = clawTarget = cfg.clawPos;
+  clawPulse = clawMicroseconds();
+  clawServo.writeMicroseconds(clawPulse);
+  // Apply the full pulse range before the timer can send the first pulse.
+  noInterrupts();
+  clawServo.attach(CLAW_SERVO_PIN, CLAW_MIN_US, CLAW_MAX_US);
+  if (clawServo.readMicroseconds() != clawPulse) clawServo.writeMicroseconds(clawPulse);
+  interrupts();
   for (byte i = 0; i < 5; ++i) fitted[i] = digitalRead(limitPins[i]) == LOW;
   driversOn = true; digitalWrite(EN_PIN, LOW);
   idleSince = lastFeed = lastStatus = millis();
@@ -674,10 +585,7 @@ void setup() {
 
 void loop() {
   bool stepsReady = prepareSteps();
-  if (stepsReady) {
-    if (driversOn) { j2.run(); j3.run(); }
-    claw.run();
-  }
+  if (stepsReady && driversOn) { j2.run(); j3.run(); }
   if (deferredCommand && !armMoving() && !pending && inputLen == 0) {
     memcpy(input, deferredInput, sizeof(input));
     deferredCommand = false; command();
@@ -686,7 +594,8 @@ void loop() {
   if ((jogging || clawJogging) && millis() - lastFeed >= 400) {
     watchdogTripped = true; stopAll(false);
   }
-  armLoop(); clawLoop();
+  armLoop();
+  if (stepsReady && !invalidatePending) clawLoop();
   if (millis() - lastStatus >= 100) { lastStatus = millis(); printStatus(); }
   persistLoop(); pumpOutput();
 }

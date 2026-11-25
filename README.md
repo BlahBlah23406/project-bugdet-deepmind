@@ -1,6 +1,6 @@
 # Robot Arm Dashboard
 
-Control the arm (joints 2 + 3 and the claw) from your keyboard.
+Control the arm (joints 2 + 3 and the servo claw) from your keyboard.
 
 ## Run it
 
@@ -25,17 +25,25 @@ No arm? Click **Start Demo / Simulator** to try it.
 | Space | Stop everything |
 | E | Motors on / off |
 | Z | Set this pose as zero |
-| H | Home the claw |
+| H | Open the claw |
 
 Hold a key to move. Let go to stop.
+
+## Claw servo wiring
+
+goBILDA 300° Torque servo:
+- Signal (yellow/white) → **D11** (J27 IN4)
+- Power (red) → a separate **5–7.4 V** supply (it can pull over 2 A, too much for the Arduino)
+- Ground (black) → that supply's ground **and** the Arduino's GND
 
 ## First time on a new arm
 
 1. Move the arm to its home pose and press **Z**.
-2. Hold **→** to open the claw fully. This also resets the claw's count.
+2. Move the claw to fully open and click **Set open point here**. Then close it as far as it
+   should go and click **Set close limit here**. If → closes it, click **Flip claw direction**.
 
-The motors have no position sensors, so the arm counts its steps. If the page says the position is
-not verified, or the claw angle shows a `~`, do the two steps above again.
+The arm motors have no position sensors, so the arm counts its steps. If the page says the position
+is not verified, do step 1 again. The servo always knows its own position.
 
 ## Upload the Arduino code (only once, or after changes)
 

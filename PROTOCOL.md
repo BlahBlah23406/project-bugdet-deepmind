@@ -67,7 +67,22 @@ Mega → Host: one JSON object per line (`\n`). Never print anything that isn't 
   open stop (it may have slipped on an object, so the count can run ahead of the real claw). It goes back to 0
   when the claw is re-synced at the open stop (open overshoot, `HC`, claw switch) or `ZC`.
 
-## Claw without sensors (v1.1)
+## Claw is a servo (v2, replaces the 28BYJ-48 notes below)
+- goBILDA 2000 Series Dual Mode servo (Torque), 300° range. Signal on **D11** (J27 IN4, pin 4; IN1–IN3 unused). Pulse 500–2500 µs = 0–300°.
+  Power: the servo can draw over 2 A when it grips, which the Arduino's 5V can't supply. Feed its red wire from
+  a separate 5–7.4 V supply and join that supply's ground to the Arduino ground.
+- Claw angle `c` = degrees closed from the open point (0 = open). Servo angle = `open` + `c` × `dir`.
+  Saved in EEPROM: `open` (servo degrees, default 150), `dir` (+1 or −1, default +1), close limit `cmax`
+  (default 90). Clamp servo angle to 0..300 and `c` to 0..cmax.
+- The servo knows its own position, so there is no drift: `cu` is always 0, `enc` 0, `sw` −1.
+- Jog (`V` claw field) moves the commanded angle at up to 120°/s × |value|/100, updated smoothly (every ~10 ms),
+  never stepping more than the rate allows. `GC <deg>` moves there at 120°/s. `S` / watchdog: claw holds where it is.
+- `HC` = go to open (c = 0). `ZC` = the current servo angle becomes the open point (c = 0).
+  `KC` = close limit = current c. New: `CDIR` flips dir (saved, and `open` stays put).
+- On boot, write the saved claw angle before `attach()` so the servo doesn't jump to the middle first.
+- `cfg` gains `"copen":<servo deg>,"cdir":<1|-1>`.
+
+## Claw without sensors (v1.1, obsolete with the servo)
 - The claw count can only be corrected at the open hard stop. So every move that ends at 0 (holding open, `GC 0`)
   keeps driving open a little past 0 (20°, at the slow home speed) into the stop, then sets the count to 0.
   The reported claw angle never goes below 0.
