@@ -96,6 +96,24 @@ Every 500 ms, after a `st` line (never in the same loop pass as one):
   → only j3 moving (`M 0 25`, then back) → claw moving. It needs at least one sensor on the 12V line.
 - Estimate without sensors: A4988 coil current limit = Vref × 1.25 A (0.1 Ω sense resistors, from the design log).
 
+## Servo current from its ground wire (v5, Arduino only)
+- One jumper from the servo's ground wire (at the servo end) to **A0**. Arduino GND joins the servo supply ground at
+  the supply end. The ground wire's own resistance `R` (mΩ) is the shunt: mA = mV_A0 / R × 1000.
+- Off by default (a floating A0 reads noise). Saved in EEPROM: `shunt` (mΩ, 0 = off).
+- ADC sharing with `vcc`: each 500 ms window first takes the 4 vcc samples (AVCC ref, bandgap channel, as now), then,
+  if shunt > 0, switches to the internal 1.1 V reference on channel A0 (Mega: ADMUX = _BV(REFS1) | 0 with
+  MUX5 cleared, i.e. INTERNAL1V1), waits 5 ms for the reference to settle (millis, non-blocking), discards the first
+  conversion, then converts back-to-back (one ADSC start per loop pass, read when done) until the window ends,
+  keeping the sum, count and peak. Before the next vcc phase switch back to AVCC + bandgap (already waits 2+ ms).
+  mV = raw × 1100 / 1024.
+- `hw` adds, when shunt > 0: `"sa":<mean mA, 0 dp>,"sap":<peak mA, 0 dp>` (negative clamps to 0).
+- `cfg` adds `"shunt":<mΩ>`.
+- Commands: `SHUNT <mΩ>` (0–1000, 0 = off, saved). `SCAL <mA>`: calibrate from a multimeter reading taken right now:
+  shunt = (latest mean mV) / mA × 1000; refuse with err if the latest mean is under 2 mV or mA <= 0 ("Load the servo
+  (grip something) and try again").
+  Also refuse if the latest mean is over 300 mV ("A0 reads too high: check the jumper to the servo's black wire");
+  the dashboard shows the same text instead of a value when sa × shunt / 1000 > 300.
+
 ## Claw is a servo (v2, replaces the 28BYJ-48 notes below)
 - goBILDA 2000 Series Dual Mode servo (Torque), 300° range. Signal on **D11** (J27 IN4, pin 4; IN1–IN3 unused). Pulse 500–2500 µs = 0–300°.
   Power: the servo can draw over 2 A when it grips, which the Arduino's 5V can't supply. Feed its red wire from

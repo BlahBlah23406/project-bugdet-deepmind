@@ -15,7 +15,7 @@ const float CLAW_RANGE = 300.0f, CLAW_SPEED = 120.0f;
 const unsigned long CLAW_INTERVAL_MS = 10;
 const long FAR_TARGET = 1000000000L;
 const unsigned long MAGIC = 0x41524D31UL;
-const uint16_t VERSION = 2;
+const uint16_t VERSION = 3;
 const byte VALID_MARK = 0xA5;
 const byte INA_ADDRESSES[4] = {0x40, 0x41, 0x44, 0x45};
 const byte INA_MAX = 4, VCC_SAMPLES = 4;
@@ -37,6 +37,7 @@ struct Saved {
   float clawPos, open, closeLimit;
   int8_t dir;
   byte speedPercent, limitsOn, inv2, inv3, trusted, enabled;
+  uint16_t shuntMilliohm;
 };
 Saved cfg, snapshot;
 bool driversOn = true, trusted = false;
@@ -63,6 +64,12 @@ uint32_t bandgapSelectedAt = 0;
 bool bandgapSettling = true, vccConverting = false;
 byte vccSamplesLeft = VCC_SAMPLES;
 uint16_t vccSum = 0, vccReadingSum = 0;
+enum AdcPhase { ADC_VCC, ADC_SERVO_SETTLE, ADC_SERVO_DISCARD, ADC_SERVO_RUN, ADC_IDLE };
+AdcPhase adcPhase = ADC_VCC;
+uint32_t servoSelectedAt = 0, servoSum = 0;
+uint16_t servoCount = 0, servoPeak = 0;
+bool servoConverting = false;
+float servoMeanMv = 0.0f, servoMeanMa = 0.0f, servoPeakMa = 0.0f;
 struct InaSensor {
   byte addr;
   float volts, milliamps;
@@ -179,6 +186,7 @@ void printConfig() {
   out.print(F("],\"cmax\":")); out.number(cfg.closeLimit, 1);
   out.print(F(",\"copen\":")); out.number(cfg.open, 1);
   out.print(F(",\"cdir\":")); out.print((int)cfg.dir);
+  out.print(F(",\"shunt\":")); out.print(cfg.shuntMilliohm);
   out.print('}'); queueLine(out);
 }
 
@@ -200,24 +208,83 @@ void printStatus() {
   out.print(F("\",\"sw\":-1,\"enc\":0,\"cu\":0}")); queueLine(out);
 }
 
+void selectBandgap(uint32_t now) {
+  ADCSRB &= ~_BV(MUX5);
+  ADMUX = _BV(REFS0) | 0b11110;
+  bandgapSelectedAt = now;
+  bandgapSettling = true;
+  vccConverting = false;
+  vccSamplesLeft = VCC_SAMPLES;
+  vccSum = 0;
+  adcPhase = ADC_VCC;
+}
+
+void startServoPhase(uint32_t now) {
+  ADCSRB &= ~_BV(MUX5);
+  ADMUX = _BV(REFS1);
+  servoSelectedAt = now;
+  servoConverting = false;
+  servoSum = 0;
+  servoCount = 0;
+  servoPeak = 0;
+  adcPhase = ADC_SERVO_SETTLE;
+}
+
 void sampleVcc(uint32_t now) {
-  if (!vccSamplesLeft) return;
-  if (bandgapSettling) {
-    // Allow 2 ms even with Timer0 millis rounding.
-    if (now - bandgapSelectedAt < 4) return;
-    bandgapSettling = false;
-  }
-  if (!vccConverting) {
-    ADCSRA |= _BV(ADSC);
-    vccConverting = true;
+  if (adcPhase == ADC_VCC) {
+    if (!vccSamplesLeft) return;
+    if (bandgapSettling) {
+      // Allow 2 ms even with Timer0 millis rounding.
+      if (now - bandgapSelectedAt < 4) return;
+      bandgapSettling = false;
+    }
+    if (!vccConverting) {
+      ADCSRA |= _BV(ADSC);
+      vccConverting = true;
+      return;
+    }
+    if (ADCSRA & _BV(ADSC)) return;
+    vccSum += ADC;
+    vccConverting = false;
+    if (--vccSamplesLeft == 0) {
+      vccReadingSum = vccSum;
+      vccSum = 0;
+      if (cfg.shuntMilliohm > 0) {
+        startServoPhase(now);
+      } else {
+        servoSum = 0;
+        servoCount = 0;
+        servoPeak = 0;
+        adcPhase = ADC_IDLE;
+      }
+    }
     return;
   }
-  if (ADCSRA & _BV(ADSC)) return;
-  vccSum += ADC;
-  vccConverting = false;
-  if (--vccSamplesLeft == 0) {
-    vccReadingSum = vccSum;
-    vccSum = 0;
+  if (adcPhase == ADC_SERVO_SETTLE) {
+    // Wait 5 ms for INTERNAL1V1 on A0 to settle.
+    if (now - servoSelectedAt < 5) return;
+    ADCSRA |= _BV(ADSC);
+    adcPhase = ADC_SERVO_DISCARD;
+    return;
+  }
+  if (adcPhase == ADC_SERVO_DISCARD) {
+    if (ADCSRA & _BV(ADSC)) return;
+    (void)ADC;
+    adcPhase = ADC_SERVO_RUN;
+    return;
+  }
+  if (adcPhase == ADC_SERVO_RUN) {
+    if (!servoConverting) {
+      ADCSRA |= _BV(ADSC);
+      servoConverting = true;
+      return;
+    }
+    if (ADCSRA & _BV(ADSC)) return;
+    uint16_t raw = ADC;
+    servoConverting = false;
+    servoSum += raw;
+    ++servoCount;
+    if (raw > servoPeak) servoPeak = raw;
   }
 }
 
@@ -280,7 +347,19 @@ void updateLoopStats(uint32_t passStart) {
   workMicros = loopPasses = longestPass = longestGap = 0;
   healthSampleTime = millis();
   healthPending = true;
-  if (!vccSamplesLeft) vccSamplesLeft = VCC_SAMPLES;
+  if (servoCount) {
+    servoMeanMv = (servoSum * 1100.0f) / (1024.0f * servoCount);
+    float peakMv = (servoPeak * 1100.0f) / 1024.0f;
+    if (cfg.shuntMilliohm > 0) {
+      servoMeanMa = max(0.0f, servoMeanMv * 1000.0f / cfg.shuntMilliohm);
+      servoPeakMa = max(0.0f, peakMv * 1000.0f / cfg.shuntMilliohm);
+    } else {
+      servoMeanMa = servoPeakMa = 0.0f;
+    }
+  } else {
+    servoMeanMv = servoMeanMa = servoPeakMa = 0.0f;
+  }
+  selectBandgap(healthSampleTime);
   if (inaCount) { inaReadIndex = 0; inaReadStage = INA_BUS; }
 }
 
@@ -310,7 +389,12 @@ void printHealth() {
     out.print(','); out.number(inaSensors[i].milliamps, 1);
     out.print(']');
   }
-  out.print(F("]}")); queueLine(out);
+  out.print(']');
+  if (cfg.shuntMilliohm > 0) {
+    out.print(F(",\"sa\":")); out.number(max(0.0f, servoMeanMa), 0);
+    out.print(F(",\"sap\":")); out.number(max(0.0f, servoPeakMa), 0);
+  }
+  out.print('}'); queueLine(out);
 }
 
 // Invalidate before any step. A reset during a move must not trust an old count.
@@ -353,6 +437,7 @@ bool goodConfig() {
   if (!isfinite(cfg.open) || cfg.open < 0 || cfg.open > CLAW_RANGE || (cfg.dir != 1 && cfg.dir != -1)) return false;
   if (!isfinite(cfg.closeLimit) || cfg.closeLimit <= 0 || cfg.closeLimit > CLAW_RANGE) return false;
   if (!isfinite(cfg.clawPos) || cfg.clawPos < 0 || cfg.clawPos > cfg.closeLimit) return false;
+  if (cfg.shuntMilliohm > 1000) return false;
   for (byte i = 0; i < 4; ++i) if (!isfinite(cfg.limits[i])) return false;
   return cfg.limits[0] <= cfg.limits[1] && cfg.limits[2] <= cfg.limits[3];
 }
@@ -702,6 +787,30 @@ void command() {
     if (!requireIdle()) return;
     cfg.inv2 = x; cfg.inv3 = y;
     j2.setPinsInverted(x, false, false); j3.setPinsInverted(y, false, false); configChanged();
+  } else if (!strcmp(cmd, "SHUNT") && count == 2 && integer(tokens[1], x, 0, 1000)) {
+    cfg.shuntMilliohm = (uint16_t)x;
+    if (cfg.shuntMilliohm > 0 && adcPhase == ADC_IDLE) startServoPhase(millis());
+    configChanged();
+  } else if (!strcmp(cmd, "SCAL") && count == 2 && number(tokens[1], a)) {
+    // A real ground wire drops well under 300 mV; more means A0 isn't wired to it.
+    if (servoMeanMv > 300.0f) {
+      message(F("A0 reads too high: check the jumper to the servo's black wire"), true);
+      return;
+    }
+    if (servoMeanMv < 2.0f || a <= 0.0f) {
+      message(F("Load the servo (grip something) and try again"), true);
+      return;
+    }
+    long s = lroundf(servoMeanMv / a * 1000.0f);
+    if (s < 1) s = 1;
+    if (s > 1000) s = 1000;
+    cfg.shuntMilliohm = (uint16_t)s;
+    configChanged();
+    JsonLine out;
+    out.print(F("{\"t\":\"msg\",\"s\":\"Shunt calibrated to "));
+    out.print(cfg.shuntMilliohm);
+    out.print(F(" mOhm\"}"));
+    queueLine(out);
   } else if (!strcmp(cmd, "?") && count == 1) {
     printConfig(); printStatus();
   } else message(F("Unknown command or invalid arguments"), true);
@@ -735,9 +844,9 @@ void setup() {
       ++inaCount;
     }
   }
-  ADCSRB &= ~_BV(MUX5);
-  ADMUX = _BV(REFS0) | 0b11110;
-  bandgapSelectedAt = millis();
+  pinMode(A0, INPUT);
+  DIDR0 |= _BV(ADC0D);
+  selectBandgap(millis());
   EEPROM.get(1, cfg);
   byte valid; EEPROM.get(0, valid);
   if (!goodConfig()) { defaults(); dirty = true; }

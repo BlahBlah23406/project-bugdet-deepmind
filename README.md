@@ -62,6 +62,11 @@ Each sensor: **VIN+** to the supply side, **VIN−** to the load side, **SDA →
 With the 12V sensor fitted, click **Current test** in the dashboard. It turns the drivers off, on, then moves
 J2, J3 and the claw one at a time, and works out what each one draws.
 
+**Servo current with just the Arduino:** run one jumper from the servo's black wire (at the servo end) to **A0**.
+Make sure the Arduino's GND joins the servo supply's ground at the supply. In the dashboard, click **Turn on (A0)**.
+The servo's own ground wire works as the measuring resistor. For accurate numbers, grip something,
+read a multimeter in series with the servo's red wire, and enter that reading under **Calibrate**.
+
 **No sensor yet?** Measure each A4988's Vref with a multimeter (black on GND, red on the small trim pot).
 Enter it in **Estimate from Vref**. Coil current limit = Vref × 1.25 A.
 

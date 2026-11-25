@@ -428,6 +428,7 @@
     #currentResults th, #currentResults td { padding: 0.3rem; text-align: left; }
     #sensorRows input { max-width: 65%; }
     [id^="vrefJ"] { width: 6em; }
+    #servoShuntInput, #servoCalInput { width: 6.5em; }
     .health-details .stat-box { padding: 5px 8px; }
 
     .health-note {
@@ -924,6 +925,37 @@
           </svg>
         </div>
       </template>
+      <h3>Servo current (Arduino only)</h3>
+      <div id="servoCurrentOff" class="health-details">
+        <p class="health-note">Run one jumper from the servo's black wire (at the servo) to A0. Arduino GND must join the servo supply's ground at the supply.</p>
+        <div><button type="button" id="btnServoTurnOn" disabled>Turn on (A0)</button></div>
+      </div>
+      <div id="servoCurrentOn" class="health-details hidden">
+        <div class="stat-box">
+          <span id="servoCurrentLabel" class="stat-label">Servo (A0) — estimate</span>
+          <strong id="servoCurrentValue" class="stat-value">—</strong>
+          <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" role="img" aria-label="Servo current over the last 2 minutes">
+            <path id="servoCurrentPlot" vector-effect="non-scaling-stroke" />
+          </svg>
+        </div>
+        <p id="servoShuntText" class="health-note">Wire resistance: 50 mΩ (estimate — calibrate for accuracy)</p>
+        <div class="form-row">
+          <label style="font-size:0.8rem; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span>Multimeter reading (mA)</span>
+            <input id="servoCalInput" type="number" min="1" step="1" placeholder="e.g. 800">
+          </label>
+          <button type="button" id="btnServoCal">Calibrate</button>
+        </div>
+        <p class="health-note">Grip something, read the multimeter in series with the servo's red wire, enter it here.</p>
+        <div class="form-row">
+          <label style="font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+            <span>Shunt (mΩ)</span>
+            <input id="servoShuntInput" type="number" min="0" max="1000" step="1" value="50">
+          </label>
+          <button type="button" id="btnServoShuntSet">Set</button>
+          <button type="button" id="btnServoTurnOff">Turn off</button>
+        </div>
+      </div>
       <div>
         <button id="currentStart" disabled>Current test</button>
         <div id="currentConfirm" class="hidden">
@@ -1287,6 +1319,9 @@
           this.cmax = 90.0; // claw close limit deg (default 90)
           this.copen = 150.0; // servo open point in servo degrees (default 150)
           this.cdir = 1; // servo direction +1 or -1 (default +1)
+          this.shunt = 0; // ground-wire shunt resistance in mOhm (0 = off)
+          this.lastSa = 120;
+          this.lastSap = 160;
 
           // Dynamic state
           this.j2 = 0; // float internal steps, rounded on output
@@ -1400,7 +1435,8 @@
             inv: [this.inv[0] ? 1 : 0, this.inv[1] ? 1 : 0],
             cmax: Number(this.cmax.toFixed(1)),
             copen: Number(this.copen.toFixed(1)),
-            cdir: this.cdir < 0 ? -1 : 1
+            cdir: this.cdir < 0 ? -1 : 1,
+            shunt: Math.round(this.shunt)
           });
         }
 
@@ -1437,8 +1473,9 @@
             : Number(Math.abs(this.v2) > 1) + Number(Math.abs(this.v3) > 1);
           const noise = () => Math.round(Math.random() * 8) - 4;
           const ma = (this.en ? 600 + 350 * activeMotors : 40) + noise();
-          const servoMa = (this.vc || Date.now() < this.servoLoadUntil ? 900 : 150) + noise();
-          this.emit({
+          const clawActive = Boolean(this.vc || Date.now() < this.servoLoadUntil);
+          const servoMa = (clawActive ? 900 : 150) + noise();
+          const hw = {
             t: 'hw',
             vcc: Number((4.93 - (moving ? 0.12 : 0) + Math.random() * 0.04).toFixed(2)),
             ram: 5400,
@@ -1453,7 +1490,17 @@
             v,
             ma,
             mw: Math.round(v * ma)
-          });
+          };
+          if (this.shunt > 0) {
+            const baseMv = (clawActive ? 40 : 6) + noise() * 0.15;
+            const sa = Math.max(0, Math.round((baseMv / this.shunt) * 1000));
+            const sap = Math.max(sa, Math.round(sa * (clawActive ? 1.25 : 1.15) + 15));
+            this.lastSa = sa;
+            this.lastSap = sap;
+            hw.sa = sa;
+            hw.sap = sap;
+          }
+          this.emit(hw);
         }
 
         stepPhysics() {
@@ -1892,6 +1939,42 @@
               this.emitCfg();
               break;
             }
+            case 'SHUNT': {
+              if (tokens.length < 2) {
+                this.emit({ t: 'err', s: 'Usage: SHUNT <mOhm>' });
+                return;
+              }
+              const r = parseInt(tokens[1], 10);
+              if (Number.isNaN(r) || r < 0 || r > 1000) {
+                this.emit({ t: 'err', s: 'SHUNT must be 0..1000 mOhm' });
+                return;
+              }
+              this.shunt = r;
+              this.emit({ t: 'msg', s: r > 0 ? `Servo shunt set to ${r} mOhm` : 'Servo current (A0) disabled' });
+              this.emitCfg();
+              break;
+            }
+            case 'SCAL': {
+              if (tokens.length < 2) {
+                this.emit({ t: 'err', s: 'Usage: SCAL <mA>' });
+                return;
+              }
+              if (this.shunt <= 0) {
+                this.emit({ t: 'err', s: 'Turn on servo current (SHUNT) first' });
+                return;
+              }
+              const ma = parseFloat(tokens[1]);
+              const clawActive = Boolean(this.vc || Date.now() < this.servoLoadUntil);
+              const latestMv = this.lastSa > 0 ? (this.lastSa * this.shunt) / 1000 : (clawActive ? 40 : 6);
+              if (Number.isNaN(ma) || ma <= 0 || latestMv < 2) {
+                this.emit({ t: 'err', s: 'Load the servo (grip something) and try again' });
+                return;
+              }
+              this.shunt = Math.max(1, Math.min(1000, Math.round((latestMv / ma) * 1000)));
+              this.emit({ t: 'msg', s: `Shunt calibrated to ${this.shunt} mOhm` });
+              this.emitCfg();
+              break;
+            }
             case '?': {
               this.emitCfg();
               this.emitSt();
@@ -2130,8 +2213,13 @@
         },
         cfg: {
           ver: 1, gear: 1.0, max: 1200, acc: 1500,
-          lim: null, inv: [0, 0], cmax: 90.0, copen: 150, cdir: 1
+          lim: null, inv: [0, 0], cmax: 90.0, copen: 150, cdir: 1, shunt: 0
         },
+        scalCalibrated: false,
+        pendingScal: false,
+        hasSa: false,
+        lastSa: NaN,
+        lastSap: NaN,
 
         // Held keys & active pointer holds
         heldKeys: new Set(),
@@ -2287,10 +2375,14 @@
           currentTest = null;
           clearAllHolds(false);
           closeCurrentConfirm();
-          byId('currentStart').disabled = !state.connected || !sensorRows.size;
+          updateCurrentStartState();
           byId('currentStatus').textContent = 'Test canceled.';
         }
         if (!state.connected || !state.transport) return;
+        const upperCmd = cmd.trim().toUpperCase();
+        if (upperCmd.startsWith('SCAL ') || upperCmd === 'SCAL') {
+          state.pendingScal = true;
+        }
         const isPeriodic = cmd === 'P' || cmd.startsWith('V ') || cmd.startsWith('M ');
         if (!isPeriodic || el.chkLogTx.checked) {
           appendLog(`TX → ${cmd}`, 'log-tx');
@@ -2347,9 +2439,15 @@
           }
           case 'msg': {
             appendLog(`INFO: ${obj.s}`, 'log-msg');
+            if (state.pendingScal && typeof obj.s === 'string' && /calibrated/i.test(obj.s)) {
+              state.pendingScal = false;
+              state.scalCalibrated = true;
+              updateServoCurrentUI();
+            }
             break;
           }
           case 'err': {
+            state.pendingScal = false;
             appendLog(`ERROR: ${obj.s}`, 'log-err');
             break;
           }
@@ -2394,7 +2492,68 @@
       const sensorDefaults = {64: '12V total', 65: 'Servo supply', 68: 'Arduino 5V', 69: 'Spare'};
       let currentTest = null;
       let completedTest = null;
-      const addressText = addr => '0x' + addr.toString(16);
+      const addressText = addr => addr === 'sa' ? 'Servo (A0)' : '0x' + addr.toString(16);
+
+      function canRunCurrentTest() {
+        return state.connected && (sensorRows.size > 0 || (Number(state.cfg.shunt) > 0 && state.hasSa));
+      }
+
+      function updateCurrentStartState() {
+        byId('currentStart').disabled = !canRunCurrentTest() || Boolean(currentTest);
+      }
+
+      function updateServoCurrentUI() {
+        const shunt = Number(state.cfg.shunt) || 0;
+        const isOn = shunt > 0;
+        byId('servoCurrentOff').classList.toggle('hidden', isOn);
+        byId('servoCurrentOn').classList.toggle('hidden', !isOn);
+        byId('btnServoTurnOn').disabled = !state.connected;
+        byId('btnServoCal').disabled = !state.connected;
+        byId('btnServoShuntSet').disabled = !state.connected;
+        byId('btnServoTurnOff').disabled = !state.connected;
+
+        if (isOn) {
+          if (document.activeElement !== byId('servoShuntInput')) {
+            byId('servoShuntInput').value = shunt;
+          }
+          const estTag = state.scalCalibrated ? '' : ' (estimate)';
+          byId('servoCurrentLabel').textContent = state.scalCalibrated
+            ? 'Servo (A0) — calibrated'
+            : 'Servo (A0) — estimate';
+          byId('servoShuntText').textContent = state.scalCalibrated
+            ? `Wire resistance: ${shunt} mΩ (calibrated)`
+            : `Wire resistance: ${shunt} mΩ (estimate — calibrate for accuracy)`;
+
+          // A real ground wire drops well under 300 mV; more means A0 is floating or miswired.
+          if (Number.isFinite(state.lastSa) && state.lastSa * shunt / 1000 > 300) {
+            byId('servoCurrentValue').textContent = "A0 reads too high: check the jumper to the servo's black wire";
+          } else if (Number.isFinite(state.lastSa)) {
+            const meanStr = `${healthNumber(state.lastSa, ' mA', 0)} mean${estTag}`;
+            const peakStr = Number.isFinite(state.lastSap) ? ` · ${healthNumber(state.lastSap, ' mA', 0)} peak${estTag}` : '';
+            byId('servoCurrentValue').textContent = meanStr + peakStr;
+          } else {
+            byId('servoCurrentValue').textContent = `—${estTag}`;
+          }
+          const saValues = healthHistory.map(sample => sample.sa).filter(Number.isFinite);
+          drawHealthPlot(byId('servoCurrentPlot'), 'sa', Math.min(0, ...saValues), Math.max(100, ...saValues));
+        }
+        updateCurrentStartState();
+      }
+
+      byId('btnServoTurnOn').onclick = () => sendCommand('SHUNT 50');
+      byId('btnServoTurnOff').onclick = () => sendCommand('SHUNT 0');
+      byId('btnServoShuntSet').onclick = () => {
+        const val = parseInt(byId('servoShuntInput').value, 10);
+        if (!Number.isNaN(val) && val >= 0 && val <= 1000) {
+          sendCommand(`SHUNT ${val}`);
+        }
+      };
+      byId('btnServoCal').onclick = () => {
+        const val = parseFloat(byId('servoCalInput').value);
+        if (!Number.isNaN(val) && val > 0) {
+          sendCommand(`SCAL ${Math.round(val)}`);
+        }
+      };
 
       function createSensorRow(addr) {
         const row = byId('sensorTemplate').content.firstElementChild.cloneNode(true);
@@ -2430,11 +2589,11 @@
         byId('sensorMessage').textContent = ina === 0
           ? 'No current sensors found. Add an INA219 (about $3) on SDA D20 / SCL D21 — see README.'
           : sensors.length ? 'Last 2 minutes' : 'Waiting for current sensor data.';
-        if (!sensors.length) {
+        if (!sensors.length && !(Number(state.cfg.shunt) > 0 && state.hasSa)) {
           if (currentTest) triggerEmergencyStop();
           closeCurrentConfirm();
         }
-        byId('currentStart').disabled = !state.connected || !sensors.length || Boolean(currentTest);
+        updateCurrentStartState();
       }
 
       function closeCurrentConfirm() {
@@ -2470,7 +2629,7 @@
         closeCurrentConfirm();
       };
       byId('currentRun').onclick = () => {
-        if (!state.connected || !sensorRows.size || currentTest) return;
+        if (!canRunCurrentTest() || currentTest) return;
         clearAllHolds(true);
         completedTest = null;
         byId('currentResults').classList.add('hidden');
@@ -2478,7 +2637,9 @@
         byId('currentStart').disabled = true;
         currentTest = new CurrentTest(state.st.c, state.cfg.cmax, cmd => sendCommand(cmd, true),
           step => { byId('currentStatus').textContent = 'Measuring ' + step.toLowerCase() + '…'; });
-        currentTest.addresses = [...sensorRows.keys()];
+        const addrs = [...sensorRows.keys()];
+        if (Number(state.cfg.shunt) > 0 && state.hasSa) addrs.push('sa');
+        currentTest.addresses = addrs;
         currentTest.tick(performance.now());
       };
 
@@ -2496,6 +2657,17 @@
         const sensors = hw.ina === 0 ? [] : hw.cs ?? (hw.ina === 1 ? [[64, hw.v, hw.ma]] : []);
         const sample = { vcc: hw.vcc, cpu: hw.cpu, ram: hw.ram };
         for (const [addr, , ma] of sensors) sample[addr] = ma;
+        if (Number.isFinite(hw.sa)) {
+          sample.sa = hw.sa;
+          state.hasSa = true;
+          state.lastSa = hw.sa;
+          state.lastSap = Number.isFinite(hw.sap) ? hw.sap : NaN;
+          if (!state.cfg.shunt) state.cfg.shunt = 50;
+        } else {
+          state.hasSa = false;
+          state.lastSa = NaN;
+          state.lastSap = NaN;
+        }
         healthHistory.push(sample);
         if (healthHistory.length > HEALTH_POINTS) healthHistory.shift();
 
@@ -2523,7 +2695,14 @@
         drawHealthPlot(el.healthRamPlot, 'ram', 0, hasRamTotal ? hw.ramt : 8192);
 
         updateSensorRows(sensors, hw.ina);
-        if (currentTest) currentTest.sample(sensors, performance.now());
+        updateServoCurrentUI();
+        if (currentTest) {
+          const testSamples = Number.isFinite(hw.sa) ? [...sensors, ['sa', 0, hw.sa]] : sensors;
+          if (Number.isFinite(hw.sa) && !currentTest.addresses.includes('sa')) {
+            currentTest.addresses.push('sa');
+          }
+          currentTest.sample(testSamples, performance.now());
+        }
         setHealthVisible(true);
       }
 
@@ -2681,17 +2860,24 @@
           el.limActiveStatus.textContent = 'Limits: OFF';
           el.limActiveStatus.className = 'badge';
         }
+        updateServoCurrentUI();
       }
 
       function updateConnectionUI() {
         if (!state.connected) {
           currentTest = null;
           completedTest = null;
+          state.scalCalibrated = false;
+          state.pendingScal = false;
+          state.hasSa = false;
+          state.lastSa = NaN;
+          state.lastSap = NaN;
           byId('currentResults').classList.add('hidden');
           byId('currentStatus').textContent = '';
           updateSensorRows([], null);
           healthHistory.length = 0;
           setHealthVisible(false);
+          updateServoCurrentUI();
           el.connBadge.className = 'badge';
           el.connText.textContent = 'Disconnected';
           el.btnConnect.textContent = 'Connect USB Serial';
@@ -2714,6 +2900,7 @@
           el.btnConnect.disabled = true;
           el.btnRefresh.disabled = false;
         }
+        updateServoCurrentUI();
         updateTelemetryUI();
       }
 
@@ -3022,7 +3209,7 @@
             completedTest = currentTest;
             currentTest = null;
             closeCurrentConfirm();
-            byId('currentStart').disabled = !sensorRows.size;
+            updateCurrentStartState();
             byId('currentStatus').textContent = 'Test complete.';
             showCurrentResults(completedTest);
           }
