@@ -42,8 +42,28 @@ The **Board health** panel shows how hard the Arduino is working:
 - **5V rail**: should stay near 5 V. Below 4.6 V the board can reset or drop USB (usually the servo or motors pulling it down).
 - **CPU load** and **worst pause**: high values mean the motor steps get delayed.
 - **Free RAM**.
-- **Current**: needs an INA219 sensor (about $3). Wire it in the 12V line, with SDA → D20, SCL → D21, VCC → 5V, GND → GND.
-  It's found automatically at power-up.
+
+## Measuring current
+
+The board has no current sensors of its own. Add up to four **INA219** boards (about $3 each).
+They're found automatically at power-up.
+
+| Sensor | Address jumpers | Goes in |
+|---|---|---|
+| 12V total (motors) | none (0x40) | the + wire between the 12V switch and J30 |
+| Servo supply | A0 (0x41) | the + wire of the servo's own supply |
+| Arduino 5V | A1 (0x44) | optional |
+| Spare | A0 + A1 (0x45) | optional |
+
+Each sensor: **VIN+** to the supply side, **VIN−** to the load side, **SDA → D20**, **SCL → D21**,
+**VCC → 5V**, **GND → GND**. Every sensor shares the same four SDA/SCL/VCC/GND wires.
+
+**Per-motor current:** both motor drivers share one 12V feed, so one sensor can't watch each motor directly.
+With the 12V sensor fitted, click **Current test** in the dashboard. It turns the drivers off, on, then moves
+J2, J3 and the claw one at a time, and works out what each one draws.
+
+**No sensor yet?** Measure each A4988's Vref with a multimeter (black on GND, red on the small trim pot).
+Enter it in **Estimate from Vref**. Coil current limit = Vref × 1.25 A.
 
 ## First time on a new arm
 

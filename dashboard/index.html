@@ -423,6 +423,11 @@
       gap: 8px;
     }
 
+    #currentsHeading { margin: 0; }
+    [aria-labelledby="currentsHeading"] > * + * { margin-top: 0.75rem; }
+    #currentResults th, #currentResults td { padding: 0.3rem; text-align: left; }
+    #sensorRows input { max-width: 65%; }
+    [id^="vrefJ"] { width: 6em; }
     .health-details .stat-box { padding: 5px 8px; }
 
     .health-note {
@@ -885,16 +890,7 @@
               <path id="healthRamPlot" vector-effect="non-scaling-stroke" />
             </svg>
           </div>
-          <div id="healthIna" class="stat-box hidden" title="The INA219 measures current, voltage, and power on the supply wired through it.">
-            <span class="stat-label">Current</span>
-            <span id="healthCurrent" class="stat-value"></span>
-            <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" aria-hidden="true">
-              <path id="healthCurrentPlot" vector-effect="non-scaling-stroke" />
-            </svg>
-            <span id="healthBus" class="health-note"></span>
-          </div>
         </div>
-        <p id="healthNoIna" class="health-note hidden">Current: add an INA219 sensor (I2C D20/D21) to measure it.</p>
         <div class="health-grid">
           <div class="stat-box" title="This is how many times per second the board runs its main loop.">
             <span class="stat-label">Loop speed</span>
@@ -913,6 +909,39 @@
             <span id="healthDrop" class="stat-value"></span>
           </div>
         </div>
+      </div>
+    </section>
+    <section class="card" aria-labelledby="currentsHeading">
+      <div class="card-header"><h2 id="currentsHeading">Currents</h2></div>
+      <p id="sensorMessage" class="health-note">Waiting for current sensor data.</p>
+      <div id="sensorRows" class="health-details"></div>
+      <template id="sensorTemplate">
+        <div class="stat-box">
+          <label><span></span> <input type="text" maxlength="64" aria-label="Sensor label"></label>
+          <strong class="stat-value"></strong>
+          <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" role="img" aria-label="Current over the last 2 minutes">
+            <path vector-effect="non-scaling-stroke" />
+          </svg>
+        </div>
+      </template>
+      <div>
+        <button id="currentStart" disabled>Current test</button>
+        <div id="currentConfirm" class="hidden">
+          <p>The motor drivers switch off for 2.5 s first, so the motors go limp: support the arm or rest it in a safe pose. Then J2 and J3 turn back and forth at 25% for about 1 s each, and the claw opens/closes 20°. Keep clear. Press Z at the home pose afterwards, because turning the drivers off clears the arm's zero.</p>
+          <button id="currentRun">Start test</button>
+        </div>
+        <button id="currentCancel" class="hidden">Cancel</button>
+        <span id="currentStatus" role="status"></span>
+      </div>
+      <div id="currentResults" class="hidden" style="overflow-x:auto">
+        <table></table>
+        <p class="health-note">Motor currents are measured by difference because both drivers share one 12V feed.</p>
+      </div>
+      <h3>Estimate from Vref</h3>
+      <p class="health-note">Measure voltage on each A4988 pot with a multimeter. Holding draw assumes 1.5 Ω coils and 85% efficiency.</p>
+      <div class="health-details">
+        <label>Vref J2 (V) <input id="vrefJ2" type="number" min="0" step="any"><br><output for="vrefJ2"></output></label>
+        <label>Vref J3 (V) <input id="vrefJ3" type="number" min="0" step="any"><br><output for="vrefJ3"></output></label>
       </div>
     </section>
     </div>
@@ -1293,6 +1322,7 @@
           this.lastStepMs = Date.now();
           this.physicsTimer = null;
           this.statusTimer = null;
+          this.servoLoadUntil = 0;
           this.healthTimer = null;
           this.bootTimer = null;
         }
@@ -1402,7 +1432,12 @@
         emitHealth() {
           const moving = this.isMoving();
           const v = Number((12.05 - (moving ? 0.15 : 0) + Math.random() * 0.08).toFixed(2));
-          const ma = (moving ? 1450 : 280) + Math.round(Math.random() * (moving ? 100 : 40));
+          const activeMotors = this.mode === 'jog_m'
+            ? Number(this.cmdM2Pct !== 0) + Number(this.cmdM3Pct !== 0)
+            : Number(Math.abs(this.v2) > 1) + Number(Math.abs(this.v3) > 1);
+          const noise = () => Math.round(Math.random() * 8) - 4;
+          const ma = (this.en ? 600 + 350 * activeMotors : 40) + noise();
+          const servoMa = (this.vc || Date.now() < this.servoLoadUntil ? 900 : 150) + noise();
           this.emit({
             t: 'hw',
             vcc: Number((4.93 - (moving ? 0.12 : 0) + Math.random() * 0.04).toFixed(2)),
@@ -1413,7 +1448,8 @@
             lmax: (moving ? 600 : 300) + Math.round(Math.random() * 300),
             txq: Math.round(Math.random() * 60),
             drop: 0,
-            ina: 1,
+            ina: 2,
+            cs: [[64, v, ma], [65, 6, servoMa]],
             v,
             ma,
             mw: Math.round(v * ma)
@@ -1640,6 +1676,7 @@
               break;
             }
             case 'S': {
+              this.servoLoadUntil = 0;
               this.cmdPitchPct = 0;
               this.cmdRollPct = 0;
               this.cmdClawPct = 0;
@@ -1697,6 +1734,8 @@
                 return;
               }
               this.targetCDeg = this.clampClawDeg(targetC);
+              // Include servo settling under load after a change in position.
+              if (this.targetCDeg !== this.cDeg) this.servoLoadUntil = Date.now() + 1200;
               this.clawMode = 'goto';
               this.emit({ t: 'msg', s: `Claw moving to ${this.targetCDeg.toFixed(1)}°` });
               break;
@@ -1997,8 +2036,71 @@
         }
       }
 
+      class CurrentTest {
+        constructor(claw, cmax, send, progress) {
+          this.send = send;
+          this.progress = progress;
+          // [measurement, command, duration in ms, sampling starts at ms]
+          this.steps = [
+            ['Baseline', 'E 0', 2500, 1500],
+            ['Holding', 'E 1', 2500, 1500],
+            ['J2', 'M 25 0', 1200, 0], ['J2', 'M -25 0', 1200, 0],
+            ['J3', 'M 0 25', 1200, 0], ['J3', 'M 0 -25', 1200, 0],
+            ['Claw', `GC ${Math.min(cmax, claw + 20)}`, 1200, 200],
+            ['Claw', `GC ${claw}`, 1200, 200]
+          ];
+          this.measurements = new Map();
+          this.index = -1;
+          this.lastPing = -Infinity;
+        }
+
+        sample(sensors, now) {
+          const step = this.steps[this.index];
+          if (!step || now - this.started < step[3] || now - this.started > step[2]) return;
+          for (const [addr, , ma] of sensors) {
+            if (!Number.isFinite(ma)) continue;
+            if (!this.measurements.has(addr)) this.measurements.set(addr, {});
+            const readings = this.measurements.get(addr);
+            (readings[step[0]] ??= []).push(ma);
+          }
+        }
+
+        tick(now) {
+          let step = this.steps[this.index];
+          if (!step || now - this.started >= step[2]) {
+            if (step?.[1].startsWith('M ') && this.steps[this.index + 1]?.[0] !== step[0]) {
+              this.send('M 0 0');
+            }
+            step = this.steps[++this.index];
+            if (!step) return true;
+            this.started = now;
+            this.progress(step[0]);
+            this.send(step[1]);
+          } else if (step[1].startsWith('M ')) {
+            this.send(step[1]);
+          }
+          if (now - this.lastPing >= 180) {
+            this.send('P');
+            this.lastPing = now;
+          }
+          return false;
+        }
+
+        results(addr) {
+          const readings = this.measurements.get(addr) || {};
+          const mean = key => {
+            const values = readings[key];
+            return values ? values.reduce((sum, ma) => sum + ma, 0) / values.length : NaN;
+          };
+          const holding = mean('Holding');
+          return [mean('Baseline'), holding - mean('Baseline'), mean('J2') - holding,
+            mean('J3') - holding, mean('Claw') - holding];
+        }
+      }
+
       // Export for Node testing if running outside browser DOM
       if (typeof window === 'undefined' && typeof global !== 'undefined') {
+        global.CurrentTest = CurrentTest;
         global.SimulatedMegaBoard = SimulatedMegaBoard;
         global.SimulatorTransport = SimulatorTransport;
         return;
@@ -2087,13 +2189,9 @@
         healthEmpty: document.getElementById('healthEmpty'),
         healthWindow: document.getElementById('healthWindow'),
         healthDetails: document.getElementById('healthDetails'),
-        healthIna: document.getElementById('healthIna'),
-        healthNoIna: document.getElementById('healthNoIna'),
         healthVcc: document.getElementById('healthVcc'),
         healthCpu: document.getElementById('healthCpu'),
         healthRam: document.getElementById('healthRam'),
-        healthCurrent: document.getElementById('healthCurrent'),
-        healthBus: document.getElementById('healthBus'),
         healthLps: document.getElementById('healthLps'),
         healthLmax: document.getElementById('healthLmax'),
         healthTxq: document.getElementById('healthTxq'),
@@ -2101,7 +2199,6 @@
         healthVccPlot: document.getElementById('healthVccPlot'),
         healthCpuPlot: document.getElementById('healthCpuPlot'),
         healthRamPlot: document.getElementById('healthRamPlot'),
-        healthCurrentPlot: document.getElementById('healthCurrentPlot'),
 
         limPins: [
           document.getElementById('limD22'),
@@ -2184,13 +2281,21 @@
       }
 
       // Send command over active transport
-      function sendCommand(cmd) {
+      function sendCommand(cmd, fromCurrentTest = false) {
+        if (currentTest && !fromCurrentTest) {
+          if (cmd !== 'S') return;
+          currentTest = null;
+          clearAllHolds(false);
+          closeCurrentConfirm();
+          byId('currentStart').disabled = !state.connected || !sensorRows.size;
+          byId('currentStatus').textContent = 'Test canceled.';
+        }
         if (!state.connected || !state.transport) return;
         const isPeriodic = cmd === 'P' || cmd.startsWith('V ') || cmd.startsWith('M ');
         if (!isPeriodic || el.chkLogTx.checked) {
           appendLog(`TX → ${cmd}`, 'log-tx');
         }
-        state.transport.sendLine(cmd);
+        return state.transport.sendLine(cmd);
       }
 
       // Parse incoming serial line
@@ -2284,9 +2389,114 @@
         el.healthDetails.classList.toggle('hidden', !visible);
       }
 
+      const byId = id => document.getElementById(id);
+      const sensorRows = new Map();
+      const sensorDefaults = {64: '12V total', 65: 'Servo supply', 68: 'Arduino 5V', 69: 'Spare'};
+      let currentTest = null;
+      let completedTest = null;
+      const addressText = addr => '0x' + addr.toString(16);
+
+      function createSensorRow(addr) {
+        const row = byId('sensorTemplate').content.firstElementChild.cloneNode(true);
+        row.querySelector('span').textContent = addressText(addr);
+        const input = row.querySelector('input');
+        input.setAttribute('aria-label', `Label for sensor ${addressText(addr)}`);
+        const storageKey = 'ina219-label-' + addr;
+        input.value = sensorDefaults[addr] || addressText(addr);
+        try { input.value = localStorage.getItem(storageKey) ?? input.value; } catch (_) {}
+        input.addEventListener('input', () => {
+          try { localStorage.setItem(storageKey, input.value); } catch (_) {}
+          if (completedTest) showCurrentResults(completedTest);
+        });
+        byId('sensorRows').appendChild(row);
+        sensorRows.set(addr, row);
+        return row;
+      }
+
+      function updateSensorRows(sensors, ina) {
+        for (const [addr, row] of sensorRows) {
+          if (!sensors.some(entry => entry[0] === addr)) {
+            row.remove();
+            sensorRows.delete(addr);
+          }
+        }
+        for (const [addr, v, ma] of sensors) {
+          const row = sensorRows.get(addr) || createSensorRow(addr);
+          row.querySelector('strong').textContent =
+            [healthNumber(ma, ' mA', 1), healthNumber(v, ' V', 2), healthNumber(v * ma / 1000, ' W', 2)].join(' · ');
+          const values = healthHistory.map(sample => sample[addr]).filter(Number.isFinite);
+          drawHealthPlot(row.querySelector('path'), addr, Math.min(0, ...values), Math.max(100, ...values));
+        }
+        byId('sensorMessage').textContent = ina === 0
+          ? 'No current sensors found. Add an INA219 (about $3) on SDA D20 / SCL D21 — see README.'
+          : sensors.length ? 'Last 2 minutes' : 'Waiting for current sensor data.';
+        if (!sensors.length) {
+          if (currentTest) triggerEmergencyStop();
+          closeCurrentConfirm();
+        }
+        byId('currentStart').disabled = !state.connected || !sensors.length || Boolean(currentTest);
+      }
+
+      function closeCurrentConfirm() {
+        byId('currentConfirm').classList.add('hidden');
+        byId('currentCancel').classList.add('hidden');
+      }
+
+      function showCurrentResults(test) {
+        const table = byId('currentResults').querySelector('table');
+        table.replaceChildren();
+        const addrs = test.addresses;
+        const headings = table.insertRow();
+        for (const name of ['Measurement', ...addrs.map(addr => sensorRows.get(addr)?.querySelector('input').value || addressText(addr))]) {
+          const th = document.createElement('th');
+          th.textContent = name;
+          headings.appendChild(th);
+        }
+        const labels = ['Baseline (drivers off)', 'Both motors holding', 'J2 moving extra', 'J3 moving extra', 'Claw moving extra'];
+        labels.forEach((label, index) => {
+          const row = table.insertRow();
+          row.insertCell().textContent = label;
+          for (const addr of addrs) row.insertCell().textContent = healthNumber(test.results(addr)[index], ' mA', 1);
+        });
+        byId('currentResults').classList.remove('hidden');
+      }
+
+      byId('currentStart').onclick = () => {
+        byId('currentConfirm').classList.remove('hidden');
+        byId('currentCancel').classList.remove('hidden');
+      };
+      byId('currentCancel').onclick = () => {
+        if (currentTest) triggerEmergencyStop();
+        closeCurrentConfirm();
+      };
+      byId('currentRun').onclick = () => {
+        if (!state.connected || !sensorRows.size || currentTest) return;
+        clearAllHolds(true);
+        completedTest = null;
+        byId('currentResults').classList.add('hidden');
+        byId('currentConfirm').classList.add('hidden');
+        byId('currentStart').disabled = true;
+        currentTest = new CurrentTest(state.st.c, state.cfg.cmax, cmd => sendCommand(cmd, true),
+          step => { byId('currentStatus').textContent = 'Measuring ' + step.toLowerCase() + '…'; });
+        currentTest.addresses = [...sensorRows.keys()];
+        currentTest.tick(performance.now());
+      };
+
+      for (const id of ['vrefJ2', 'vrefJ3']) {
+        const input = byId(id);
+        input.oninput = () => {
+          const limit = input.valueAsNumber * 1.25;
+          const draw = 2 * (limit * 0.707) ** 2 * 1.5 / 12 / 0.85;
+          document.querySelector(`output[for="${id}"]`).textContent = Number.isFinite(limit) && limit >= 0
+            ? `${limit.toFixed(2)} A per phase · ${(draw * 1000).toFixed(0)} mA holding at 12 V (rough estimate)` : '';
+        };
+      }
+
       function updateHealthUI(hw) {
-        const hasIna = hw.ina === 1;
-        healthHistory.push({ vcc: hw.vcc, cpu: hw.cpu, ram: hw.ram, ma: hasIna ? hw.ma : null });
+        const sensors = hw.ina === 0 ? [] : hw.cs ?? (hw.ina === 1 ? [[64, hw.v, hw.ma]] : []);
+        const sample = { vcc: hw.vcc, cpu: hw.cpu, ram: hw.ram };
+        for (const [addr, , ma] of sensors) sample[addr] = ma;
+        healthHistory.push(sample);
         if (healthHistory.length > HEALTH_POINTS) healthHistory.shift();
 
         const hasRamTotal = Number.isFinite(hw.ramt) && hw.ramt > 0;
@@ -2312,14 +2522,8 @@
         drawHealthPlot(el.healthCpuPlot, 'cpu', 0, 100);
         drawHealthPlot(el.healthRamPlot, 'ram', 0, hasRamTotal ? hw.ramt : 8192);
 
-        el.healthIna.classList.toggle('hidden', !hasIna);
-        el.healthNoIna.classList.toggle('hidden', hw.ina !== 0);
-        if (hasIna) {
-          const currents = healthHistory.map(sample => sample.ma).filter(Number.isFinite);
-          drawHealthPlot(el.healthCurrentPlot, 'ma', Math.min(0, ...currents), Math.max(2000, ...currents));
-          el.healthCurrent.textContent = healthNumber(hw.ma, ' mA');
-          el.healthBus.textContent = `${healthNumber(hw.v, ' V', 2)} · ${healthNumber(hw.mw, ' mW')}`;
-        }
+        updateSensorRows(sensors, hw.ina);
+        if (currentTest) currentTest.sample(sensors, performance.now());
         setHealthVisible(true);
       }
 
@@ -2481,6 +2685,11 @@
 
       function updateConnectionUI() {
         if (!state.connected) {
+          currentTest = null;
+          completedTest = null;
+          byId('currentResults').classList.add('hidden');
+          byId('currentStatus').textContent = '';
+          updateSensorRows([], null);
           healthHistory.length = 0;
           setHealthVisible(false);
           el.connBadge.className = 'badge';
@@ -2565,6 +2774,7 @@
 
       async function stopConnection() {
         if (state.transport) {
+          if (currentTest) await sendCommand('S');
           const t = state.transport;
           state.transport = null;
           await t.disconnect();
@@ -2648,6 +2858,13 @@
 
       // Keyboard events
       window.addEventListener('keydown', (e) => {
+        if (currentTest) {
+          if (e.code === 'Space') {
+            e.preventDefault();
+            triggerEmergencyStop();
+          }
+          return;
+        }
         if (e.key === 'Shift') {
           state.shiftHeld = true;
           setKeycapLit('Shift', true);
@@ -2735,7 +2952,7 @@
 
       // Requirement (2): On window blur / visibilitychange hidden: clear held keys and send S
       window.addEventListener('blur', () => {
-        const hadActiveMotion = state.heldKeys.size > 0 || state.wasJoggingV || state.wasJoggingM || state.st.mv;
+        const hadActiveMotion = currentTest || state.heldKeys.size > 0 || state.wasJoggingV || state.wasJoggingM || state.st.mv;
         clearAllHolds(false);
         if (state.connected && hadActiveMotion) {
           sendCommand('S');
@@ -2760,6 +2977,7 @@
           }
         };
         btn.addEventListener('pointerdown', (e) => {
+          if (currentTest) return;
           e.preventDefault();
           btn.classList.add('active-hold');
           onPress();
@@ -2799,6 +3017,17 @@
       let tickCounter = 0;
       setInterval(() => {
         if (!state.connected) return;
+        if (currentTest) {
+          if (currentTest.tick(performance.now())) {
+            completedTest = currentTest;
+            currentTest = null;
+            closeCurrentConfirm();
+            byId('currentStart').disabled = !sensorRows.size;
+            byId('currentStatus').textContent = 'Test complete.';
+            showCurrentResults(completedTest);
+          }
+          return;
+        }
         tickCounter++;
 
         // Stale-data check (>1000 ms since last st line)

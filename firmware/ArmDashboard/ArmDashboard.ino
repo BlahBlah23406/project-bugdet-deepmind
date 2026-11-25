@@ -17,7 +17,8 @@ const long FAR_TARGET = 1000000000L;
 const unsigned long MAGIC = 0x41524D31UL;
 const uint16_t VERSION = 2;
 const byte VALID_MARK = 0xA5;
-const byte INA_ADDRESS = 0x40, VCC_SAMPLES = 4;
+const byte INA_ADDRESSES[4] = {0x40, 0x41, 0x44, 0x45};
+const byte INA_MAX = 4, VCC_SAMPLES = 4;
 const uint32_t HEALTH_WINDOW_US = 500000UL;
 
 extern char __heap_start;
@@ -62,11 +63,15 @@ uint32_t bandgapSelectedAt = 0;
 bool bandgapSettling = true, vccConverting = false;
 byte vccSamplesLeft = VCC_SAMPLES;
 uint16_t vccSum = 0, vccReadingSum = 0;
-bool inaPresent = false;
+struct InaSensor {
+  byte addr;
+  float volts, milliamps;
+  uint16_t busRaw;
+};
+InaSensor inaSensors[INA_MAX];
+byte inaCount = 0, inaReadIndex = 0;
 enum InaReadStage { INA_IDLE, INA_BUS, INA_SHUNT };
 InaReadStage inaReadStage = INA_IDLE;
-uint16_t inaBusRaw = 0;
-float inaVolts = 0, inaMilliamps = 0;
 
 // Build JSON in RAM, then drain only as much as the UART can accept.
 uint32_t lastService = 0, longestGap = 0;
@@ -216,28 +221,37 @@ void sampleVcc(uint32_t now) {
   }
 }
 
-bool readInaRegister(byte reg, uint16_t &value) {
+bool readInaRegister(byte addr, byte reg, uint16_t &value) {
   Wire.clearWireTimeoutFlag();
-  Wire.beginTransmission(INA_ADDRESS);
+  Wire.beginTransmission(addr);
   Wire.write(reg);
-  if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom(INA_ADDRESS, (byte)2) != 2 || Wire.getWireTimeoutFlag()) return false;
+  if (Wire.endTransmission() != 0 || Wire.getWireTimeoutFlag()) return false;
+  if (Wire.requestFrom(addr, (byte)2) != 2 || Wire.getWireTimeoutFlag()) return false;
   uint16_t high = Wire.read();
   value = (high << 8) | Wire.read();
   return true;
 }
 
 void sampleIna() {
-  // Read one register per pass and only publish a complete sample.
+  // Read one register per pass, round-robin across sensors; keep old values on failure.
+  if (inaReadStage == INA_IDLE || inaReadIndex >= inaCount) {
+    inaReadStage = INA_IDLE;
+    return;
+  }
+  InaSensor &s = inaSensors[inaReadIndex];
   if (inaReadStage == INA_BUS) {
-    inaReadStage = readInaRegister(0x02, inaBusRaw) ? INA_SHUNT : INA_IDLE;
+    if (readInaRegister(s.addr, 0x02, s.busRaw)) {
+      inaReadStage = INA_SHUNT;
+    } else {
+      inaReadStage = (++inaReadIndex < inaCount) ? INA_BUS : INA_IDLE;
+    }
   } else if (inaReadStage == INA_SHUNT) {
     uint16_t shuntRaw;
-    if (readInaRegister(0x01, shuntRaw)) {
-      inaVolts = (inaBusRaw >> 3) * 0.004f;
-      inaMilliamps = (int16_t)shuntRaw * 0.1f;
+    if (readInaRegister(s.addr, 0x01, shuntRaw)) {
+      s.volts = (s.busRaw >> 3) * 0.004f;
+      s.milliamps = (int16_t)shuntRaw * 0.1f;
     }
-    inaReadStage = INA_IDLE;
+    inaReadStage = (++inaReadIndex < inaCount) ? INA_BUS : INA_IDLE;
   }
 }
 
@@ -267,7 +281,7 @@ void updateLoopStats(uint32_t passStart) {
   healthSampleTime = millis();
   healthPending = true;
   if (!vccSamplesLeft) vccSamplesLeft = VCC_SAMPLES;
-  if (inaPresent) inaReadStage = INA_BUS;
+  if (inaCount) { inaReadIndex = 0; inaReadStage = INA_BUS; }
 }
 
 void printHealth() {
@@ -282,13 +296,21 @@ void printHealth() {
   out.print(F(",\"lmax\":")); out.print(healthLongest);
   out.print(F(",\"txq\":")); out.print(txWaiting);
   out.print(F(",\"drop\":")); out.print(droppedLines);
-  out.print(F(",\"ina\":")); out.print(inaPresent ? 1 : 0);
-  if (inaPresent) {
-    out.print(F(",\"v\":")); out.number(inaVolts, 3);
-    out.print(F(",\"ma\":")); out.number(inaMilliamps, 1);
-    out.print(F(",\"mw\":")); out.number(inaVolts * inaMilliamps, 1);
+  out.print(F(",\"ina\":")); out.print(inaCount);
+  if (inaCount) {
+    out.print(F(",\"v\":")); out.number(inaSensors[0].volts, 3);
+    out.print(F(",\"ma\":")); out.number(inaSensors[0].milliamps, 1);
+    out.print(F(",\"mw\":")); out.number(inaSensors[0].volts * inaSensors[0].milliamps, 1);
   }
-  out.print('}'); queueLine(out);
+  out.print(F(",\"cs\":["));
+  for (byte i = 0; i < inaCount; ++i) {
+    if (i) out.print(',');
+    out.print('['); out.print(inaSensors[i].addr);
+    out.print(','); out.number(inaSensors[i].volts, 2);
+    out.print(','); out.number(inaSensors[i].milliamps, 1);
+    out.print(']');
+  }
+  out.print(F("]}")); queueLine(out);
 }
 
 // Invalidate before any step. A reset during a move must not trust an old count.
@@ -705,8 +727,14 @@ void setup() {
   Wire.begin();
   Wire.setClock(400000);
   Wire.setWireTimeout(3000, true);
-  Wire.beginTransmission(INA_ADDRESS);
-  inaPresent = Wire.endTransmission() == 0;
+  for (byte i = 0; i < INA_MAX; ++i) {
+    Wire.clearWireTimeoutFlag();
+    Wire.beginTransmission(INA_ADDRESSES[i]);
+    if (Wire.endTransmission() == 0 && !Wire.getWireTimeoutFlag()) {
+      inaSensors[inaCount] = {INA_ADDRESSES[i], 0.0f, 0.0f, 0};
+      ++inaCount;
+    }
+  }
   ADCSRB &= ~_BV(MUX5);
   ADMUX = _BV(REFS0) | 0b11110;
   bandgapSelectedAt = millis();

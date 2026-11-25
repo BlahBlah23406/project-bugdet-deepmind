@@ -84,6 +84,18 @@ Every 500 ms, after a `st` line (never in the same loop pass as one):
   leave the old values. Assume the common 0.1 Ω shunt (current LSB from the shunt-voltage register: 10 µV / 0.1 Ω = 0.1 mA).
 - `drop`: count of lines `queueLine()` had to drop because the TX queue was full.
 
+## Current sensors (v4)
+- Up to four INA219 boards, probed once at boot at I2C 0x40, 0x41, 0x44, 0x45 (set by each board's A0/A1 jumpers).
+  Same maths as v3 (0.1 Ω shunt: mA = shunt raw × 0.1, V = (bus raw >> 3) × 0.004). One register read per loop
+  pass, round-robin, a full set refreshed every 500 ms; on a failed read keep the old values.
+- `hw` keeps `ina` (now the number of sensors found, 0–4) and adds `"cs":[[addr,v,ma],...]` with one entry per sensor
+  found (addr as a decimal number, e.g. 64 for 0x40; v 2 dp; ma 1 dp). The old `v`/`ma`/`mw` fields stay and
+  mirror the first sensor, so older dashboards keep working.
+- Per-motor current can't be measured directly: all drivers share one 12V copper pour. The dashboard's current test
+  measures by difference with the arm still: drivers off → drivers on (holding) → only j2 moving (`M 25 0`, then back)
+  → only j3 moving (`M 0 25`, then back) → claw moving. It needs at least one sensor on the 12V line.
+- Estimate without sensors: A4988 coil current limit = Vref × 1.25 A (0.1 Ω sense resistors, from the design log).
+
 ## Claw is a servo (v2, replaces the 28BYJ-48 notes below)
 - goBILDA 2000 Series Dual Mode servo (Torque), 300° range. Signal on **D11** (J27 IN4, pin 4; IN1–IN3 unused). Pulse 500–2500 µs = 0–300°.
   Power: the servo can draw over 2 A when it grips, which the Arduino's 5V can't supply. Feed its red wire from
