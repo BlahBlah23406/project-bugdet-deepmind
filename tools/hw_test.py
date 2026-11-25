@@ -78,6 +78,12 @@ while time.time() - t0 < 1.0:
     if pump(0.2, lambda m: m.get("t") == "st"):
         n += 1
 check("status rate ~10 Hz", 6 <= n <= 14, f"{n}/s")
+hw = pump(1.5, lambda m: m.get("t") == "hw")
+check("health line", hw is not None, json.dumps(hw))
+if hw:
+    check("5V rail 4.5-5.5 V", 4.5 <= hw.get("vcc", 0) <= 5.5, f"{hw.get('vcc')} V")
+    check("free RAM > 1 KB", hw.get("ram", 0) > 1024, f"{hw.get('ram')} bytes")
+    check("worst loop pause < 3 ms", hw.get("lmax", 99999) < 3000, f"{hw.get('lmax')} us")
 send("FOO")
 check("unknown command -> err", pump(1, lambda m: m.get("t") == "err") is not None)
 send("SPD 30"); check("SPD", pump(1, lambda m: m.get("t") == "st" and m.get("spd") == 30) is not None)

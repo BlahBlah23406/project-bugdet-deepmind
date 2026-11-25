@@ -282,7 +282,13 @@
       gap: 12px;
     }
 
-    .col-telemetry { grid-column: span 5; }
+    .col-telemetry {
+      grid-column: span 5;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
     .col-jog { grid-column: span 4; }
     .col-actions { grid-column: span 3; }
     .col-config { grid-column: span 6; }
@@ -404,6 +410,45 @@
       font-size: 0.95rem;
       font-weight: 700;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .health-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .health-details {
+      display: grid;
+      gap: 8px;
+    }
+
+    .health-details .stat-box { padding: 5px 8px; }
+
+    .health-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .health-chart {
+      display: block;
+      width: 100%;
+      height: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .health-chart path {
+      fill: none;
+      stroke: var(--brand);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .health-chart line {
+      stroke: var(--warn);
+      stroke-dasharray: 4 3;
     }
 
     .switches-row {
@@ -706,7 +751,8 @@
 
   <main class="grid-layout">
     <!-- 1. LIVE TELEMETRY & GAUGES -->
-    <section class="card col-telemetry" aria-label="Live Telemetry">
+    <div class="col-telemetry">
+    <section class="card" aria-label="Live Telemetry">
       <div class="card-header">
         <h2>Live Telemetry &amp; Joint Angles</h2>
         <span id="movingBadge" class="badge">Idle</span>
@@ -808,6 +854,68 @@
         </div>
       </div>
     </section>
+
+    <section class="card" aria-labelledby="boardHealthHeading">
+      <div class="card-header">
+        <h2 id="boardHealthHeading">Board health</h2>
+        <span id="healthWindow" class="health-note hidden">Last 2 minutes</span>
+      </div>
+      <p id="healthEmpty" class="health-note">No health data from this firmware</p>
+      <div id="healthDetails" class="health-details hidden">
+        <div class="health-grid">
+          <div class="stat-box" title="Below 4.6 V the board may reset or lose USB.">
+            <span class="stat-label">5V rail</span>
+            <span id="healthVcc" class="stat-value"></span>
+            <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="23.6" x2="239" y2="23.6" vector-effect="non-scaling-stroke" />
+              <path id="healthVccPlot" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>
+          <div class="stat-box" title="This is the share of time the board spends on work other than stepping the motors.">
+            <span class="stat-label">CPU load</span>
+            <span id="healthCpu" class="stat-value"></span>
+            <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" aria-hidden="true">
+              <path id="healthCpuPlot" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>
+          <div class="stat-box" title="Free RAM is the memory available for the board to use.">
+            <span class="stat-label">Free RAM</span>
+            <span id="healthRam" class="stat-value"></span>
+            <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" aria-hidden="true">
+              <path id="healthRamPlot" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>
+          <div id="healthIna" class="stat-box hidden" title="The INA219 measures current, voltage, and power on the supply wired through it.">
+            <span class="stat-label">Current</span>
+            <span id="healthCurrent" class="stat-value"></span>
+            <svg class="health-chart" viewBox="-1 0 241 40" preserveAspectRatio="none" aria-hidden="true">
+              <path id="healthCurrentPlot" vector-effect="non-scaling-stroke" />
+            </svg>
+            <span id="healthBus" class="health-note"></span>
+          </div>
+        </div>
+        <p id="healthNoIna" class="health-note hidden">Current: add an INA219 sensor (I2C D20/D21) to measure it.</p>
+        <div class="health-grid">
+          <div class="stat-box" title="This is how many times per second the board runs its main loop.">
+            <span class="stat-label">Loop speed</span>
+            <span id="healthLps" class="stat-value"></span>
+          </div>
+          <div class="stat-box" title="The longest loop pass can delay motor steps, which may stutter above 3000 µs.">
+            <span class="stat-label">Worst pause</span>
+            <span id="healthLmax" class="stat-value"></span>
+          </div>
+          <div class="stat-box" title="These bytes are waiting to be sent over USB.">
+            <span class="stat-label">TX backlog</span>
+            <span id="healthTxq" class="stat-value"></span>
+          </div>
+          <div class="stat-box" title="This counts lines lost because the board's send queue was full.">
+            <span class="stat-label">Dropped lines</span>
+            <span id="healthDrop" class="stat-value"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+    </div>
 
     <!-- 2. HOLD-TO-MOVE JOG CONTROLS & KEY VISUALIZER -->
     <section class="card col-jog" aria-label="Manual Jog Controls">
@@ -1132,7 +1240,7 @@
       'use strict';
 
       // =========================================================================
-      // 1. SIMULATOR / FAKE MEGA 2560 BOARD (Implements PROTOCOL.md v2 Servo Claw)
+      // 1. SIMULATOR / FAKE MEGA 2560 BOARD (servo claw and health telemetry)
       // =========================================================================
       class SimulatedMegaBoard {
         constructor(onEmitLine) {
@@ -1185,6 +1293,7 @@
           this.lastStepMs = Date.now();
           this.physicsTimer = null;
           this.statusTimer = null;
+          this.healthTimer = null;
           this.bootTimer = null;
         }
 
@@ -1231,6 +1340,8 @@
             this.emit({ t: 'hello', fw: 'ArmDashboard', ver: 1 });
             this.emitCfg();
             this.emitSt();
+            // Start health on a different tick from the periodic status lines.
+            this.healthTimer = setInterval(() => this.emitHealth(), 500);
           }, 80);
 
           this.physicsTimer = setInterval(() => this.stepPhysics(), 20);
@@ -1241,9 +1352,11 @@
           if (this.bootTimer) clearTimeout(this.bootTimer);
           if (this.physicsTimer) clearInterval(this.physicsTimer);
           if (this.statusTimer) clearInterval(this.statusTimer);
+          if (this.healthTimer) clearInterval(this.healthTimer);
           this.bootTimer = null;
           this.physicsTimer = null;
           this.statusTimer = null;
+          this.healthTimer = null;
         }
 
         emitCfg() {
@@ -1261,9 +1374,12 @@
           });
         }
 
+        isMoving() {
+          return Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.vc) > 0.1 ||
+                 this.mode === 'goto_g' || this.clawMode === 'goto';
+        }
+
         emitSt() {
-          const moving = (Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.vc) > 0.1 ||
-                          this.mode === 'goto_g' || this.clawMode === 'goto') ? 1 : 0;
           this.emit({
             t: 'st',
             j2: Math.round(this.j2),
@@ -1271,7 +1387,7 @@
             p: Number(this.getPitchDeg().toFixed(1)),
             r: Number(this.getRollDeg().toFixed(1)),
             c: Number(this.getClawDeg().toFixed(1)),
-            mv: moving,
+            mv: this.isMoving() ? 1 : 0,
             en: this.en ? 1 : 0,
             tr: this.tr ? 1 : 0,
             spd: Math.round(this.spd),
@@ -1280,6 +1396,27 @@
             sw: -1,
             enc: 0,
             cu: 0
+          });
+        }
+
+        emitHealth() {
+          const moving = this.isMoving();
+          const v = Number((12.05 - (moving ? 0.15 : 0) + Math.random() * 0.08).toFixed(2));
+          const ma = (moving ? 1450 : 280) + Math.round(Math.random() * (moving ? 100 : 40));
+          this.emit({
+            t: 'hw',
+            vcc: Number((4.93 - (moving ? 0.12 : 0) + Math.random() * 0.04).toFixed(2)),
+            ram: 5400,
+            ramt: 8192,
+            cpu: (moving ? 24 : 15) + Math.round(Math.random() * 6),
+            lps: (moving ? 38000 : 40000) + Math.round(Math.random() * 1800),
+            lmax: (moving ? 600 : 300) + Math.round(Math.random() * 300),
+            txq: Math.round(Math.random() * 60),
+            drop: 0,
+            ina: 1,
+            v,
+            ma,
+            mw: Math.round(v * ma)
           });
         }
 
@@ -1870,6 +2007,9 @@
       // =========================================================================
       // 3. DASHBOARD APPLICATION STATE & DOM BINDINGS
       // =========================================================================
+      const HEALTH_POINTS = 240;
+      const healthHistory = [];
+
       const state = {
         connected: false,
         mode: 'none', // 'none' | 'serial' | 'sim'
@@ -1943,6 +2083,25 @@
         valTrusted: document.getElementById('valTrusted'),
         valSpd: document.getElementById('valSpd'),
         valWatchdog: document.getElementById('valWatchdog'),
+
+        healthEmpty: document.getElementById('healthEmpty'),
+        healthWindow: document.getElementById('healthWindow'),
+        healthDetails: document.getElementById('healthDetails'),
+        healthIna: document.getElementById('healthIna'),
+        healthNoIna: document.getElementById('healthNoIna'),
+        healthVcc: document.getElementById('healthVcc'),
+        healthCpu: document.getElementById('healthCpu'),
+        healthRam: document.getElementById('healthRam'),
+        healthCurrent: document.getElementById('healthCurrent'),
+        healthBus: document.getElementById('healthBus'),
+        healthLps: document.getElementById('healthLps'),
+        healthLmax: document.getElementById('healthLmax'),
+        healthTxq: document.getElementById('healthTxq'),
+        healthDrop: document.getElementById('healthDrop'),
+        healthVccPlot: document.getElementById('healthVccPlot'),
+        healthCpuPlot: document.getElementById('healthCpuPlot'),
+        healthRamPlot: document.getElementById('healthRamPlot'),
+        healthCurrentPlot: document.getElementById('healthCurrentPlot'),
 
         limPins: [
           document.getElementById('limD22'),
@@ -2077,6 +2236,10 @@
             updateTelemetryUI();
             break;
           }
+          case 'hw': {
+            updateHealthUI(obj);
+            break;
+          }
           case 'msg': {
             appendLog(`INFO: ${obj.s}`, 'log-msg');
             break;
@@ -2090,6 +2253,74 @@
             break;
           }
         }
+      }
+
+      function drawHealthPlot(plot, key, min, max) {
+        let path = '';
+        let penDown = false;
+        const start = HEALTH_POINTS - healthHistory.length;
+        healthHistory.forEach((sample, index) => {
+          const value = sample[key];
+          if (!Number.isFinite(value)) {
+            penDown = false;
+            return;
+          }
+          const fraction = Math.max(0, Math.min(1, (value - min) / (max - min)));
+          const y = (38 - fraction * 36).toFixed(2);
+          const point = `${start + index} ${y}`;
+          path += penDown ? `L${point}` : `M${point}h0`;
+          penDown = true;
+        });
+        plot.setAttribute('d', path);
+      }
+
+      function healthNumber(value, unit = '', digits = 0) {
+        return Number.isFinite(value) ? `${value.toFixed(digits)}${unit}` : '—';
+      }
+
+      function setHealthVisible(visible) {
+        el.healthEmpty.classList.toggle('hidden', visible);
+        el.healthWindow.classList.toggle('hidden', !visible);
+        el.healthDetails.classList.toggle('hidden', !visible);
+      }
+
+      function updateHealthUI(hw) {
+        const hasIna = hw.ina === 1;
+        healthHistory.push({ vcc: hw.vcc, cpu: hw.cpu, ram: hw.ram, ma: hasIna ? hw.ma : null });
+        if (healthHistory.length > HEALTH_POINTS) healthHistory.shift();
+
+        const hasRamTotal = Number.isFinite(hw.ramt) && hw.ramt > 0;
+        const ramPercent = Number.isFinite(hw.ram) && hasRamTotal ? ` (${Math.round(hw.ram / hw.ramt * 100)}%)` : '';
+        el.healthRam.textContent = healthNumber(hw.ram, ' B') + ramPercent;
+        el.healthCpu.textContent = healthNumber(hw.cpu, '%');
+        el.healthVcc.textContent = healthNumber(hw.vcc, ' V', 2);
+        el.healthVcc.style.color = Number.isFinite(hw.vcc)
+          ? (hw.vcc < 4.6 ? 'var(--danger)' : hw.vcc < 4.75 ? 'var(--warn)' : '')
+          : '';
+        el.healthLps.textContent = hw.lps >= 1000
+          ? healthNumber(hw.lps / 1000, 'k/s')
+          : healthNumber(hw.lps, '/s');
+        el.healthLmax.textContent = healthNumber(hw.lmax, ' µs');
+        el.healthLmax.style.color = Number.isFinite(hw.lmax)
+          ? (hw.lmax > 3000 ? 'var(--danger)' : hw.lmax > 1000 ? 'var(--warn)' : '')
+          : '';
+        el.healthTxq.textContent = healthNumber(hw.txq, ' B');
+        el.healthDrop.textContent = healthNumber(hw.drop);
+
+        // The dashed 4.6 V line sits at y = 23.6 on the 4.0–5.5 V scale.
+        drawHealthPlot(el.healthVccPlot, 'vcc', 4.0, 5.5);
+        drawHealthPlot(el.healthCpuPlot, 'cpu', 0, 100);
+        drawHealthPlot(el.healthRamPlot, 'ram', 0, hasRamTotal ? hw.ramt : 8192);
+
+        el.healthIna.classList.toggle('hidden', !hasIna);
+        el.healthNoIna.classList.toggle('hidden', hw.ina !== 0);
+        if (hasIna) {
+          const currents = healthHistory.map(sample => sample.ma).filter(Number.isFinite);
+          drawHealthPlot(el.healthCurrentPlot, 'ma', Math.min(0, ...currents), Math.max(2000, ...currents));
+          el.healthCurrent.textContent = healthNumber(hw.ma, ' mA');
+          el.healthBus.textContent = `${healthNumber(hw.v, ' V', 2)} · ${healthNumber(hw.mw, ' mW')}`;
+        }
+        setHealthVisible(true);
       }
 
       // Map angle to 0..300 SVG coordinates given display range [minRange, maxRange]
@@ -2250,6 +2481,8 @@
 
       function updateConnectionUI() {
         if (!state.connected) {
+          healthHistory.length = 0;
+          setHealthVisible(false);
           el.connBadge.className = 'badge';
           el.connText.textContent = 'Disconnected';
           el.btnConnect.textContent = 'Connect USB Serial';

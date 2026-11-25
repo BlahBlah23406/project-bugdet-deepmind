@@ -36,6 +36,15 @@ goBILDA 300° Torque servo:
 - Power (red) → a separate **5–7.4 V** supply (it can pull over 2 A, too much for the Arduino)
 - Ground (black) → that supply's ground **and** the Arduino's GND
 
+## Board health
+
+The **Board health** panel shows how hard the Arduino is working:
+- **5V rail**: should stay near 5 V. Below 4.6 V the board can reset or drop USB (usually the servo or motors pulling it down).
+- **CPU load** and **worst pause**: high values mean the motor steps get delayed.
+- **Free RAM**.
+- **Current**: needs an INA219 sensor (about $3). Wire it in the 12V line, with SDA → D20, SCL → D21, VCC → 5V, GND → GND.
+  It's found automatically at power-up.
+
 ## First time on a new arm
 
 1. Move the arm to its home pose and press **Z**.
@@ -48,4 +57,4 @@ is not verified, do step 1 again. The servo always knows its own position.
 ## Upload the Arduino code (only once, or after changes)
 
 Open `firmware/ArmDashboard/ArmDashboard.ino` in the Arduino IDE, install the **AccelStepper**
-library, pick **Arduino Mega 2560** and click Upload.
+and **Servo** libraries, pick **Arduino Mega 2560** and click Upload.

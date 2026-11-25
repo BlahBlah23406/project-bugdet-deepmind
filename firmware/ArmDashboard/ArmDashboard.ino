@@ -2,6 +2,7 @@
 #include <AccelStepper.h>
 #include <Servo.h>
 #include <EEPROM.h>
+#include <Wire.h>
 #include <avr/eeprom.h>
 #include <math.h>
 #include <stdlib.h>
@@ -16,6 +17,11 @@ const long FAR_TARGET = 1000000000L;
 const unsigned long MAGIC = 0x41524D31UL;
 const uint16_t VERSION = 2;
 const byte VALID_MARK = 0xA5;
+const byte INA_ADDRESS = 0x40, VCC_SAMPLES = 4;
+const uint32_t HEALTH_WINDOW_US = 500000UL;
+
+extern char __heap_start;
+extern char *__brkval;
 
 AccelStepper j2(AccelStepper::DRIVER, 27, 29);
 AccelStepper j3(AccelStepper::DRIVER, 31, 33);
@@ -46,8 +52,26 @@ long goal2 = 0, goal3 = 0;
 bool dirty = false, saveActive = false, savedValid = false;
 bool invalidatePending = false, invalidWriting = false;
 uint16_t saveIndex = 0;
+bool statusPrinted = false, healthPending = false;
+uint32_t previousPassStart = 0, stepMicros = 0, windowStart = 0;
+uint32_t workMicros = 0, loopPasses = 0, longestPass = 0;
+uint32_t healthLps = 0, healthLongest = 0, healthSampleTime = 0, peakLps = 0;
+byte healthCpu = 0;
+bool loopStarted = false;
+uint32_t bandgapSelectedAt = 0;
+bool bandgapSettling = true, vccConverting = false;
+byte vccSamplesLeft = VCC_SAMPLES;
+uint16_t vccSum = 0, vccReadingSum = 0;
+bool inaPresent = false;
+enum InaReadStage { INA_IDLE, INA_BUS, INA_SHUNT };
+InaReadStage inaReadStage = INA_IDLE;
+uint16_t inaBusRaw = 0;
+float inaVolts = 0, inaMilliamps = 0;
 
 // Build JSON in RAM, then drain only as much as the UART can accept.
+uint32_t lastService = 0, longestGap = 0;
+void serviceSteppers();
+
 class JsonLine : public Print {
 public:
   char data[360];
@@ -60,16 +84,40 @@ public:
       char text[24];
       dtostre(value, text, digits, 0);
       print(text);
+    } else if (digits <= 3 && magnitude < 1.0e6f) {
+      // Fast path: print a scaled whole number. Print's float routine takes ~1 ms per value.
+      long scale = digits == 0 ? 1 : digits == 1 ? 10 : digits == 2 ? 100 : 1000;
+      long n = lroundf(value * scale);
+      if (n < 0) { print('-'); n = -n; }
+      print(n / scale);
+      if (digits) {
+        print('.');
+        long frac = n % scale;
+        for (long d = scale / 10; d > 1 && frac < d; d /= 10) print('0');
+        print(frac);
+      }
     } else print(value, digits);
   }
   size_t write(uint8_t c) override {
     if (used >= sizeof(data) - 1) return 0;
     data[used++] = c;
+    if ((used & 15) == 0) serviceSteppers();
     return 1;
   }
 };
+// Give both arm motors a chance to step, and track the longest wait between chances.
+// Called from loop() and every 16 characters while a JSON line is built, so a long
+// line never holds up a step for more than a fraction of a millisecond.
+void serviceSteppers() {
+  uint32_t now = micros();
+  if (lastService && now - lastService > longestGap) longestGap = now - lastService;
+  lastService = now;
+  if (driversOn && !invalidatePending && !invalidWriting) { j2.run(); j3.run(); }
+}
+
 char tx[1536];
 uint16_t txHead = 0, txTail = 0;
+uint32_t droppedLines = 0;
 char input[160];
 byte inputLen = 0;
 bool inputOverflow = false;
@@ -78,13 +126,13 @@ bool deferredCommand = false;
 
 void queueLine(JsonLine &line) {
   uint16_t freeBytes = (txTail + sizeof(tx) - txHead - 1) % sizeof(tx);
-  if (freeBytes < line.used + 1) return;
+  if (freeBytes < line.used + 1) { ++droppedLines; return; }
   for (uint16_t i = 0; i < line.used; ++i) {
     tx[txHead] = line.data[i];
-    txHead = (txHead + 1) % sizeof(tx);
+    if (++txHead == sizeof(tx)) txHead = 0;  // No % per byte: the AVR has no divide instruction
   }
   tx[txHead] = '\n';
-  txHead = (txHead + 1) % sizeof(tx);
+  if (++txHead == sizeof(tx)) txHead = 0;
 }
 
 void pumpOutput() {
@@ -93,7 +141,7 @@ void pumpOutput() {
   if (room > 16) room = 16;
   while (room-- > 0 && txTail != txHead) {
     Serial.write(tx[txTail]);
-    txTail = (txTail + 1) % sizeof(tx);
+    if (++txTail == sizeof(tx)) txTail = 0;
   }
 }
 
@@ -130,12 +178,13 @@ void printConfig() {
 }
 
 void printStatus() {
+  statusPrinted = true;
   JsonLine out;
   out.print(F("{\"t\":\"st\",\"j2\":")); out.print(j2.currentPosition());
   out.print(F(",\"j3\":")); out.print(j3.currentPosition());
   out.print(F(",\"p\":")); out.number(pitchSteps() / stepsPerDegree(), 1);
   out.print(F(",\"r\":")); out.number(rollSteps() / stepsPerDegree(), 1);
-  out.print(F(",\"c\":")); out.print(clawPos, 1);
+  out.print(F(",\"c\":")); out.number(clawPos, 1);
   out.print(F(",\"mv\":")); out.print(moving() ? 1 : 0);
   out.print(F(",\"en\":")); out.print(driversOn ? 1 : 0);
   out.print(F(",\"tr\":")); out.print(trusted ? 1 : 0);
@@ -144,6 +193,102 @@ void printStatus() {
   out.print(F(",\"lim\":\""));
   for (byte i = 0; i < 5; ++i) out.print(!fitted[i] ? '-' : (digitalRead(limitPins[i]) == HIGH ? '1' : '0'));
   out.print(F("\",\"sw\":-1,\"enc\":0,\"cu\":0}")); queueLine(out);
+}
+
+void sampleVcc(uint32_t now) {
+  if (!vccSamplesLeft) return;
+  if (bandgapSettling) {
+    // Allow 2 ms even with Timer0 millis rounding.
+    if (now - bandgapSelectedAt < 4) return;
+    bandgapSettling = false;
+  }
+  if (!vccConverting) {
+    ADCSRA |= _BV(ADSC);
+    vccConverting = true;
+    return;
+  }
+  if (ADCSRA & _BV(ADSC)) return;
+  vccSum += ADC;
+  vccConverting = false;
+  if (--vccSamplesLeft == 0) {
+    vccReadingSum = vccSum;
+    vccSum = 0;
+  }
+}
+
+bool readInaRegister(byte reg, uint16_t &value) {
+  Wire.clearWireTimeoutFlag();
+  Wire.beginTransmission(INA_ADDRESS);
+  Wire.write(reg);
+  if (Wire.endTransmission() != 0) return false;
+  if (Wire.requestFrom(INA_ADDRESS, (byte)2) != 2 || Wire.getWireTimeoutFlag()) return false;
+  uint16_t high = Wire.read();
+  value = (high << 8) | Wire.read();
+  return true;
+}
+
+void sampleIna() {
+  // Read one register per pass and only publish a complete sample.
+  if (inaReadStage == INA_BUS) {
+    inaReadStage = readInaRegister(0x02, inaBusRaw) ? INA_SHUNT : INA_IDLE;
+  } else if (inaReadStage == INA_SHUNT) {
+    uint16_t shuntRaw;
+    if (readInaRegister(0x01, shuntRaw)) {
+      inaVolts = (inaBusRaw >> 3) * 0.004f;
+      inaMilliamps = (int16_t)shuntRaw * 0.1f;
+    }
+    inaReadStage = INA_IDLE;
+  }
+}
+
+void updateLoopStats(uint32_t passStart) {
+  if (!loopStarted) {
+    loopStarted = true;
+    windowStart = previousPassStart = passStart;
+    return;
+  }
+
+  // Consecutive starts include all work in the previous pass.
+  uint32_t passMicros = passStart - previousPassStart;
+  previousPassStart = passStart;
+  workMicros += passMicros - stepMicros;
+  ++loopPasses;
+  if (passMicros > longestPass) longestPass = passMicros;
+
+  uint32_t windowMicros = passStart - windowStart;
+  if (windowMicros < HEALTH_WINDOW_US) return;
+  healthLps = 1000000.0f * loopPasses / windowMicros;
+  // The loop never idles, so load = how much slower it runs than the fastest (idle) window seen.
+  if (healthLps > peakLps) peakLps = healthLps;
+  healthCpu = peakLps ? 100 - (byte)(100.0f * healthLps / peakLps) : 0;
+  healthLongest = longestGap;
+  windowStart = passStart;
+  workMicros = loopPasses = longestPass = longestGap = 0;
+  healthSampleTime = millis();
+  healthPending = true;
+  if (!vccSamplesLeft) vccSamplesLeft = VCC_SAMPLES;
+  if (inaPresent) inaReadStage = INA_BUS;
+}
+
+void printHealth() {
+  JsonLine out;
+  uint16_t ram = SP - (uintptr_t)(__brkval ? __brkval : &__heap_start);
+  uint16_t txWaiting = (txHead + sizeof(tx) - txTail) % sizeof(tx);
+  float vcc = vccReadingSum ? 1.1f * 1023 * VCC_SAMPLES / vccReadingSum : 0.0f;
+  out.print(F("{\"t\":\"hw\",\"vcc\":")); out.number(vcc, 2);
+  out.print(F(",\"ram\":")); out.print(ram);
+  out.print(F(",\"ramt\":8192,\"cpu\":")); out.print(healthCpu);
+  out.print(F(",\"lps\":")); out.print(healthLps);
+  out.print(F(",\"lmax\":")); out.print(healthLongest);
+  out.print(F(",\"txq\":")); out.print(txWaiting);
+  out.print(F(",\"drop\":")); out.print(droppedLines);
+  out.print(F(",\"ina\":")); out.print(inaPresent ? 1 : 0);
+  if (inaPresent) {
+    out.print(F(",\"v\":")); out.number(inaVolts, 3);
+    out.print(F(",\"ma\":")); out.number(inaMilliamps, 1);
+    out.print(F(",\"mw\":")); out.number(inaVolts * inaMilliamps, 1);
+  }
+  out.print('}'); queueLine(out);
 }
 
 // Invalidate before any step. A reset during a move must not trust an old count.
@@ -557,6 +702,14 @@ void readInput() {
 void setup() {
   Serial.begin(115200);
   pinMode(EN_PIN, OUTPUT); digitalWrite(EN_PIN, HIGH);
+  Wire.begin();
+  Wire.setClock(400000);
+  Wire.setWireTimeout(3000, true);
+  Wire.beginTransmission(INA_ADDRESS);
+  inaPresent = Wire.endTransmission() == 0;
+  ADCSRB &= ~_BV(MUX5);
+  ADMUX = _BV(REFS0) | 0b11110;
+  bandgapSelectedAt = millis();
   EEPROM.get(1, cfg);
   byte valid; EEPROM.get(0, valid);
   if (!goodConfig()) { defaults(); dirty = true; }
@@ -584,8 +737,11 @@ void setup() {
 }
 
 void loop() {
+  updateLoopStats(micros());
+  statusPrinted = false;
+  stepMicros = 0;
   bool stepsReady = prepareSteps();
-  if (stepsReady && driversOn) { j2.run(); j3.run(); }
+  if (stepsReady) serviceSteppers();
   if (deferredCommand && !armMoving() && !pending && inputLen == 0) {
     memcpy(input, deferredInput, sizeof(input));
     deferredCommand = false; command();
@@ -596,6 +752,13 @@ void loop() {
   }
   armLoop();
   if (stepsReady && !invalidatePending) clawLoop();
-  if (millis() - lastStatus >= 100) { lastStatus = millis(); printStatus(); }
+  uint32_t now = millis();
+  if (now - lastStatus >= 100) { lastStatus = now; printStatus(); }
+  sampleVcc(now);
+  sampleIna();
+  if (healthPending && !statusPrinted && now - healthSampleTime >= 50) {
+    printHealth();
+    healthPending = false;
+  }
   persistLoop(); pumpOutput();
 }

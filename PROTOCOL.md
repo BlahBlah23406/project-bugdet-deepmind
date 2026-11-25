@@ -67,6 +67,23 @@ Mega → Host: one JSON object per line (`\n`). Never print anything that isn't 
   open stop (it may have slipped on an object, so the count can run ahead of the real claw). It goes back to 0
   when the claw is re-synced at the open stop (open overshoot, `HC`, claw switch) or `ZC`.
 
+## Health (v3)
+Every 500 ms, after a `st` line (never in the same loop pass as one):
+`{"t":"hw","vcc":<5V rail volts, 2 dp>,"ram":<free bytes>,"ramt":8192,"cpu":<0-100 %>,"lps":<loop passes/s>,
+  "lmax":<longest wait between stepper updates in the window, µs>,"txq":<bytes waiting in the TX queue>,"drop":<status lines dropped, total>,
+  "ina":<0|1>,"v":<bus volts>,"ma":<mA>,"mw":<mW>}`  — `v`, `ma`, `mw` only when `ina` = 1.
+- `vcc`: AVCC measured against the internal 1.1 V bandgap (ADC, non-blocking: switch the mux, start a conversion,
+  read it on a later pass; vcc = 1.1 × 1023 / reading, using the averaged reading). Below ~4.6 V = the 5V rail is sagging.
+- `ram`: gap between the heap end and the stack pointer.
+- `cpu`: load as 100 − 100 × lps / (fastest lps seen since boot). The loop never idles, so an idle board reads
+  near 0 % and extra work (JSON, EEPROM, stepping, I2C) shows as a slower loop. High `cpu` and high `lmax` mean steps get delayed.
+- `lps`: loop passes in the window, scaled to per second. `lmax` resets every window. The steppers are also
+  serviced every 16 characters while a JSON line is built, so long lines don't hold up steps.
+- `ina`: an INA219 current sensor answered at I2C 0x40 at boot (SDA D20, SCL D21). Wire it in the 12V line
+  (or the servo supply) to measure that rail. Read it every 500 ms with Wire timeout 3 ms; on a failed read
+  leave the old values. Assume the common 0.1 Ω shunt (current LSB from the shunt-voltage register: 10 µV / 0.1 Ω = 0.1 mA).
+- `drop`: count of lines `queueLine()` had to drop because the TX queue was full.
+
 ## Claw is a servo (v2, replaces the 28BYJ-48 notes below)
 - goBILDA 2000 Series Dual Mode servo (Torque), 300° range. Signal on **D11** (J27 IN4, pin 4; IN1–IN3 unused). Pulse 500–2500 µs = 0–300°.
   Power: the servo can draw over 2 A when it grips, which the Arduino's 5V can't supply. Feed its red wire from
