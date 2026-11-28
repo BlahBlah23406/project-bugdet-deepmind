@@ -1,4 +1,4 @@
-// Mega differential arm and claw. USB lines follow PROTOCOL.md, version 1.
+// Mega differential arm, top (lift) joint and claw. USB lines follow PROTOCOL.md, version 1.
 #include <AccelStepper.h>
 #include <Servo.h>
 #include <EEPROM.h>
@@ -15,7 +15,7 @@ const float CLAW_RANGE = 300.0f, CLAW_SPEED = 120.0f;
 const unsigned long CLAW_INTERVAL_MS = 10;
 const long FAR_TARGET = 1000000000L;
 const unsigned long MAGIC = 0x41524D31UL;
-const uint16_t VERSION = 3;
+const uint16_t VERSION = 4;
 const byte VALID_MARK = 0xA5;
 const byte INA_ADDRESSES[4] = {0x40, 0x41, 0x44, 0x45};
 const byte INA_MAX = 4, VCC_SAMPLES = 4;
@@ -24,8 +24,10 @@ const uint32_t HEALTH_WINDOW_US = 500000UL;
 extern char __heap_start;
 extern char *__brkval;
 
-AccelStepper j2(AccelStepper::DRIVER, 27, 29);
-AccelStepper j3(AccelStepper::DRIVER, 31, 33);
+// Driver sockets (STEP, DIR) on the PCB: A1 23/25, A2 27/29, A3 31/33, A4 35/37, A5 39/41, A6 45/47.
+AccelStepper j2(AccelStepper::DRIVER, 27, 29);  // right differential motor, socket A2
+AccelStepper j3(AccelStepper::DRIVER, 23, 25);  // left differential motor, socket A1
+AccelStepper j4(AccelStepper::DRIVER, 31, 33);  // top motor (lift, vertical rotation), socket A3
 Servo clawServo;
 
 struct Saved {
@@ -38,6 +40,10 @@ struct Saved {
   int8_t dir;
   byte speedPercent, limitsOn, inv2, inv3, trusted, enabled;
   uint16_t shuntMilliohm;
+  // Added in version 4 (top motor). Kept at the end so a version 3 save can be upgraded in place.
+  long pos4;
+  float liftGear;
+  byte inv4;
 };
 Saved cfg, snapshot;
 bool driversOn = true, trusted = false;
@@ -50,7 +56,11 @@ unsigned long lastFeed = 0, lastStatus = 0, idleSince = 0;
 bool watchdogTripped = false, jogging = false, pending = false;
 float wanted2 = 0, wanted3 = 0;
 bool pendingGoto = false, gotoActive = false;
-long goal2 = 0, goal3 = 0;
+long goal2 = 0, goal3 = 0, goal4 = 0;
+bool gotoLift = false;
+// The top motor jogs on its own, so pitch/roll keep moving while it starts or stops.
+float wanted4 = 0;
+bool jogging4 = false, pending4 = false;
 bool dirty = false, saveActive = false, savedValid = false;
 bool invalidatePending = false, invalidWriting = false;
 uint16_t saveIndex = 0;
@@ -117,14 +127,14 @@ public:
     return 1;
   }
 };
-// Give both arm motors a chance to step, and track the longest wait between chances.
+// Give all three arm motors a chance to step, and track the longest wait between chances.
 // Called from loop() and every 16 characters while a JSON line is built, so a long
 // line never holds up a step for more than a fraction of a millisecond.
 void serviceSteppers() {
   uint32_t now = micros();
   if (lastService && now - lastService > longestGap) longestGap = now - lastService;
   lastService = now;
-  if (driversOn && !invalidatePending && !invalidWriting) { j2.run(); j3.run(); }
+  if (driversOn && !invalidatePending && !invalidWriting) { j2.run(); j3.run(); j4.run(); }
 }
 
 char tx[1536];
@@ -168,8 +178,10 @@ void message(const __FlashStringHelper *s, bool error = false) {
 float stepsPerDegree() { return 1600.0f * cfg.gear / 360.0f; }
 float pitchSteps() { return j2.currentPosition() * 0.5f + j3.currentPosition() * 0.5f; }
 float rollSteps() { return j2.currentPosition() * 0.5f - j3.currentPosition() * 0.5f; }
-bool armMoving() { return j2.isRunning() || j3.isRunning(); }
-bool moving() { return armMoving() || clawPos != clawTarget || pending; }
+float liftStepsPerDegree() { return 1600.0f * cfg.liftGear / 360.0f; }
+bool pairMoving() { return j2.isRunning() || j3.isRunning(); }
+bool armMoving() { return pairMoving() || j4.isRunning(); }
+bool moving() { return armMoving() || clawPos != clawTarget || pending || pending4; }
 
 void printConfig() {
   JsonLine out;
@@ -182,7 +194,9 @@ void printConfig() {
     for (byte i = 0; i < 4; ++i) { if (i) out.print(','); out.number(cfg.limits[i], 2); }
     out.print(']');
   } else out.print(F("null"));
+  out.print(F(",\"lgear\":")); out.number(cfg.liftGear, 4);
   out.print(F(",\"inv\":[")); out.print(cfg.inv2); out.print(','); out.print(cfg.inv3);
+  out.print(','); out.print(cfg.inv4);
   out.print(F("],\"cmax\":")); out.number(cfg.closeLimit, 1);
   out.print(F(",\"copen\":")); out.number(cfg.open, 1);
   out.print(F(",\"cdir\":")); out.print((int)cfg.dir);
@@ -195,8 +209,10 @@ void printStatus() {
   JsonLine out;
   out.print(F("{\"t\":\"st\",\"j2\":")); out.print(j2.currentPosition());
   out.print(F(",\"j3\":")); out.print(j3.currentPosition());
+  out.print(F(",\"j4\":")); out.print(j4.currentPosition());
   out.print(F(",\"p\":")); out.number(pitchSteps() / stepsPerDegree(), 1);
   out.print(F(",\"r\":")); out.number(rollSteps() / stepsPerDegree(), 1);
+  out.print(F(",\"l\":")); out.number(j4.currentPosition() / liftStepsPerDegree(), 1);
   out.print(F(",\"c\":")); out.number(clawPos, 1);
   out.print(F(",\"mv\":")); out.print(moving() ? 1 : 0);
   out.print(F(",\"en\":")); out.print(driversOn ? 1 : 0);
@@ -426,6 +442,7 @@ void defaults() {
   cfg.gear = 1; cfg.maxSteps = 1200; cfg.accel = 1500;
   cfg.speedPercent = 50;
   cfg.open = 150.0f; cfg.dir = 1; cfg.closeLimit = 90.0f;
+  cfg.liftGear = 1;
 }
 
 bool goodConfig() {
@@ -438,6 +455,8 @@ bool goodConfig() {
   if (!isfinite(cfg.closeLimit) || cfg.closeLimit <= 0 || cfg.closeLimit > CLAW_RANGE) return false;
   if (!isfinite(cfg.clawPos) || cfg.clawPos < 0 || cfg.clawPos > cfg.closeLimit) return false;
   if (cfg.shuntMilliohm > 1000) return false;
+  if (!isfinite(cfg.liftGear) || cfg.liftGear <= 0 || !isfinite(1600.0f * cfg.liftGear / 360.0f)) return false;
+  if (cfg.inv4 > 1) return false;
   for (byte i = 0; i < 4; ++i) if (!isfinite(cfg.limits[i])) return false;
   return cfg.limits[0] <= cfg.limits[1] && cfg.limits[2] <= cfg.limits[3];
 }
@@ -448,6 +467,7 @@ void persistLoop() {
   if (!saveActive) {
     snapshot = cfg;
     snapshot.pos2 = j2.currentPosition(); snapshot.pos3 = j3.currentPosition();
+    snapshot.pos4 = j4.currentPosition();
     snapshot.clawPos = clawPos;
     snapshot.trusted = trusted; snapshot.enabled = driversOn;
     saveIndex = 0; saveActive = true;
@@ -483,9 +503,17 @@ void stopArm(bool quick) {
   if (v3 > 0) j3.stop(); else j3.moveTo(j3.currentPosition());
 }
 
+void stopLift(bool quick) {
+  pending4 = false;
+  j4.setAcceleration(cfg.accel * (quick ? 3 : 1));
+  if (fabs(j4.speed()) > 0) j4.stop(); else j4.moveTo(j4.currentPosition());
+}
+
 void stopAll(bool quick) {
   jogging = false; gotoActive = false; wanted2 = wanted3 = 0;
+  jogging4 = false; wanted4 = 0;
   stopArm(quick);
+  stopLift(quick);
   stopClaw();
 }
 
@@ -527,20 +555,48 @@ bool jogTarget(float v2, float v3) {
 }
 
 void startGoto() {
+  if (!gotoLift) goal4 = j4.currentPosition();  // G without a lift angle leaves the top motor where it is
   float d2 = fabs((float)goal2 - j2.currentPosition());
   float d3 = fabs((float)goal3 - j3.currentPosition());
-  float biggest = max(d2, d3);
+  float d4 = fabs((float)goal4 - j4.currentPosition());
+  float biggest = max(max(d2, d3), d4);
   if (biggest < 1) return;
+  // All three motors are scaled together so they start, ramp and arrive together.
   float speed = cfg.maxSteps * cfg.speedPercent / 100.0f;
   j2.setMaxSpeed(max(speed * d2 / biggest, 0.001f));
   j3.setMaxSpeed(max(speed * d3 / biggest, 0.001f));
+  j4.setMaxSpeed(max(speed * d4 / biggest, 0.001f));
   j2.setAcceleration(max(cfg.accel * d2 / biggest, 0.001f));
   j3.setAcceleration(max(cfg.accel * d3 / biggest, 0.001f));
-  j2.moveTo(goal2); j3.moveTo(goal3);
+  j4.setAcceleration(max(cfg.accel * d4 / biggest, 0.001f));
+  j2.moveTo(goal2); j3.moveTo(goal3); j4.moveTo(goal4);
+}
+
+void requestLift(float v4) {
+  if (gotoActive) {
+    // A lift jog cancels a go-to, which also moves the pitch/roll motors.
+    gotoActive = false; pendingGoto = false; jogging = false; wanted2 = wanted3 = 0;
+    stopArm(false);
+  } else if (jogging4 ? v4 == wanted4 : v4 == 0) return;
+  jogging4 = v4 != 0; wanted4 = v4;
+  stopLift(false);
+  pending4 = jogging4;
+  if (pending4) changed();
+}
+
+// Start a pending lift jog once the top motor has stopped.
+void liftLoop() {
+  if (!pending4 || j4.isRunning()) return;
+  pending4 = false;
+  if (!driversOn || switchBlocked() || wanted4 == 0) return;
+  j4.setAcceleration(cfg.accel);
+  j4.setMaxSpeed(fabs(wanted4));
+  j4.moveTo(j4.currentPosition() + (wanted4 > 0 ? FAR_TARGET : -FAR_TARGET));
 }
 
 void requestJog(float v2, float v3) {
   if (jogging && !pendingGoto && wanted2 == v2 && wanted3 == v3) return;
+  if (gotoActive) stopLift(false);  // the go-to was moving the top motor too
   jogging = (v2 != 0 || v3 != 0); pendingGoto = false; gotoActive = false;
   wanted2 = v2; wanted3 = v3;
   stopArm(false);
@@ -562,14 +618,15 @@ void armLoop() {
       stopAll(true); trusted = false; changed(); switchFault = true;
     }
   } else if (!switchBlocked()) switchFault = false;
-  if (pending && !armMoving()) {
+  // A go-to waits for all three motors; a pitch/roll jog only for its own two.
+  if (pending && (pendingGoto ? !armMoving() : !pairMoving())) {
     pending = false;
     if (driversOn && !switchBlocked()) {
       if (pendingGoto) startGoto(); else jogTarget(wanted2, wanted3);
     }
     pendingGoto = false;
   }
-  if (!cfg.limitsOn || !armMoving()) return;
+  if (!cfg.limitsOn || !pairMoving()) return;
   float v2 = j2.speed(), v3 = j3.speed();
   float vp = (v2 + v3) * 0.5f, vr = (v2 - v3) * 0.5f;
   float rate = 1.0e10f;
@@ -650,7 +707,7 @@ bool integer(const char *token, int &value, int low, int high) {
 }
 void configChanged() { changed(); printConfig(); }
 bool requireIdle() {
-  if (armMoving() || pending) { message(F("Arm is still stopping"), true); return false; }
+  if (armMoving() || pending || pending4) { message(F("Arm is still stopping"), true); return false; }
   return true;
 }
 
@@ -665,19 +722,24 @@ void command() {
   const char *cmd = tokens[0];
   bool needsIdle = !strcmp(cmd, "Z") || !strcmp(cmd, "CFG") || !strcmp(cmd, "INV") ||
                    !strcmp(cmd, "LIM") || !strcmp(cmd, "LIMHERE");
-  if (needsIdle && (armMoving() || pending)) {
+  if (needsIdle && (armMoving() || pending || pending4)) {
     memcpy(deferredInput, original, sizeof(input));
     deferredCommand = true;
     jogging = false; wanted2 = wanted3 = 0;
+    jogging4 = false; wanted4 = 0;
     stopArm(false);
+    stopLift(false);
     return;
   }
   float a = 0, b = 0, c = 0, d = 0;
-  int x = 0, y = 0, z = 0;
-  if ((!strcmp(cmd, "V") && count == 4) || (!strcmp(cmd, "M") && count == 3)) {
+  int x = 0, y = 0, z = 0, w = 0;
+  // V <pitch> <roll> <claw> [<lift>] and M <j2> <j3> [<j4>]: the top motor field is optional.
+  if ((!strcmp(cmd, "V") && (count == 4 || count == 5)) || (!strcmp(cmd, "M") && (count == 3 || count == 4))) {
     bool raw = cmd[0] == 'M';
+    byte liftIndex = raw ? 3 : 4;
     if (!integer(tokens[1], x, -100, 100) || !integer(tokens[2], y, -100, 100) ||
-        (!raw && !integer(tokens[3], z, -100, 100))) { message(F("Invalid jog velocity"), true); return; }
+        (!raw && !integer(tokens[3], z, -100, 100)) ||
+        (count > liftIndex && !integer(tokens[liftIndex], w, -100, 100))) { message(F("Invalid jog velocity"), true); return; }
     lastFeed = millis();
     if (!raw) watchdogTripped = false;
     float speed = cfg.maxSteps * cfg.speedPercent / 100.0f;
@@ -685,22 +747,28 @@ void command() {
     float divisor = max(100.0f, max(fabs(v2), fabs(v3)));
     if (deferredCommand) {
       // Apply the queued setting at rest; the next held-key update starts motion.
-    } else if ((v2 || v3) && (!driversOn || switchBlocked())) {
+    } else if ((v2 || v3 || w) && (!driversOn || switchBlocked())) {
       message(F("Arm drivers off or limit switch active"), true);
       requestJog(0, 0);
-    } else requestJog(v2 * speed / divisor, v3 * speed / divisor);
+      requestLift(0);
+    } else {
+      requestJog(v2 * speed / divisor, v3 * speed / divisor);
+      requestLift(w * speed / 100.0f);
+    }
     if (!raw) jogClaw(z);
   } else if (!strcmp(cmd, "P") && count == 1) {
     lastFeed = millis();
   } else if (!strcmp(cmd, "S") && count == 1) {
     deferredCommand = false; stopAll(true);
-  } else if (!strcmp(cmd, "G") && count == 3 && number(tokens[1], a) && number(tokens[2], b)) {
+  } else if (!strcmp(cmd, "G") && (count == 3 || count == 4) && number(tokens[1], a) && number(tokens[2], b) &&
+             (count == 3 || number(tokens[3], c))) {
     if (deferredCommand) { message(F("Configuration pending; arm is stopping"), true); return; }
     if (!trusted) { message(F("Position not trusted; use Z"), true); return; }
     if (!driversOn || switchBlocked()) { message(F("Arm drivers off or limit switch active"), true); return; }
     if (!insideLimits(a, b)) { message(F("Target outside soft limits"), true); return; }
     float t2 = (a + b) * stepsPerDegree(), t3 = (a - b) * stepsPerDegree();
-    if (fabs(t2) > FAR_TARGET || fabs(t3) > FAR_TARGET) { message(F("Target too large"), true); return; }
+    float t4 = c * liftStepsPerDegree();
+    if (fabs(t2) > FAR_TARGET || fabs(t3) > FAR_TARGET || fabs(t4) > FAR_TARGET) { message(F("Target too large"), true); return; }
     // Quantize within the joint box, including limits not on a full step.
     goal2 = lround(t2); goal3 = lround(t3);
     bool found = false;
@@ -714,7 +782,9 @@ void command() {
       if (error < best) { goal2 = q2; goal3 = q3; best = error; found = true; }
     }
     if (!found) { message(F("No motor step inside target limits"), true); return; }
+    gotoLift = count == 4; goal4 = lround(t4);
     stopArm(false); jogging = false; wanted2 = wanted3 = 0;
+    stopLift(false); jogging4 = false; wanted4 = 0;
     pendingGoto = true; gotoActive = true; pending = true; changed();
   } else if (!strcmp(cmd, "GC") && count == 2 && number(tokens[1], a)) {
     if (a < 0 || a > cfg.closeLimit) { message(F("Claw target outside limits"), true); return; }
@@ -735,13 +805,15 @@ void command() {
     cfg.dir = -cfg.dir; configChanged();
   } else if (!strcmp(cmd, "Z") && count == 1) {
     if (!requireIdle()) return;
-    changed(); j2.setCurrentPosition(0); j3.setCurrentPosition(0); trusted = true;
+    changed(); j2.setCurrentPosition(0); j3.setCurrentPosition(0); j4.setCurrentPosition(0); trusted = true;
     message(F("Arm zero marked"));
   } else if (!strcmp(cmd, "E") && count == 2 && integer(tokens[1], x, 0, 1)) {
     changed(); driversOn = x;
     if (!driversOn) {
       stopArm(false); jogging = false; gotoActive = false; wanted2 = wanted3 = 0;
+      stopLift(false); jogging4 = false; wanted4 = 0;
       j2.setCurrentPosition(j2.currentPosition()); j3.setCurrentPosition(j3.currentPosition());
+      j4.setCurrentPosition(j4.currentPosition());
       trusted = false;
     }
     digitalWrite(EN_PIN, driversOn ? LOW : HIGH);
@@ -750,15 +822,20 @@ void command() {
     cfg.speedPercent = x;
     if (jogging) requestJog(wanted2 * ratio, wanted3 * ratio);
     else if (gotoActive) {
-      stopArm(false); pendingGoto = true; pending = true;
+      stopArm(false); stopLift(false); pendingGoto = true; pending = true;
     }
+    if (jogging4) requestLift(wanted4 * ratio);
     configChanged();
-  } else if (!strcmp(cmd, "CFG") && count == 4 && number(tokens[1], a) && number(tokens[2], b) && number(tokens[3], c)) {
-    if (a <= 0 || b <= 0 || c <= 0 || !isfinite(1600.0f * a / 360.0f) || 1600.0f * a / 360.0f <= 0) {
+  } else if (!strcmp(cmd, "CFG") && (count == 4 || count == 5) && number(tokens[1], a) && number(tokens[2], b) &&
+             number(tokens[3], c) && (count == 4 || number(tokens[4], d))) {
+    // CFG <gear> <maxSteps> <accel> [<liftGear>]
+    if (count == 4) d = cfg.liftGear;
+    if (a <= 0 || b <= 0 || c <= 0 || d <= 0 || !isfinite(1600.0f * a / 360.0f) || 1600.0f * a / 360.0f <= 0 ||
+        !isfinite(1600.0f * d / 360.0f) || 1600.0f * d / 360.0f <= 0) {
       message(F("Configuration out of range"), true); return;
     }
     if (!requireIdle()) return;
-    cfg.gear = a; cfg.maxSteps = b; cfg.accel = c; configChanged();
+    cfg.gear = a; cfg.maxSteps = b; cfg.accel = c; cfg.liftGear = d; configChanged();
   } else if (!strcmp(cmd, "LIM") && count == 2 && !strcmp(tokens[1], "OFF")) {
     cfg.limitsOn = false; configChanged();
   } else if (!strcmp(cmd, "LIM") && count == 5 && number(tokens[1], a) && number(tokens[2], b) && number(tokens[3], c) && number(tokens[4], d)) {
@@ -783,10 +860,14 @@ void command() {
       message(F("Limit minimum exceeds maximum"), true); return;
     }
     cfg.limits[i] = value; cfg.limitsOn = true; configChanged();
-  } else if (!strcmp(cmd, "INV") && count == 3 && integer(tokens[1], x, 0, 1) && integer(tokens[2], y, 0, 1)) {
+  } else if (!strcmp(cmd, "INV") && (count == 3 || count == 4) && integer(tokens[1], x, 0, 1) &&
+             integer(tokens[2], y, 0, 1) && (count == 3 || integer(tokens[3], z, 0, 1))) {
+    // INV <j2> <j3> [<j4>]
     if (!requireIdle()) return;
-    cfg.inv2 = x; cfg.inv3 = y;
-    j2.setPinsInverted(x, false, false); j3.setPinsInverted(y, false, false); configChanged();
+    if (count == 3) z = cfg.inv4;
+    cfg.inv2 = x; cfg.inv3 = y; cfg.inv4 = z;
+    j2.setPinsInverted(x, false, false); j3.setPinsInverted(y, false, false);
+    j4.setPinsInverted(z, false, false); configChanged();
   } else if (!strcmp(cmd, "SHUNT") && count == 2 && integer(tokens[1], x, 0, 1000)) {
     cfg.shuntMilliohm = (uint16_t)x;
     if (cfg.shuntMilliohm > 0 && adcPhase == ADC_IDLE) startServoPhase(millis());
@@ -849,14 +930,22 @@ void setup() {
   selectBandgap(millis());
   EEPROM.get(1, cfg);
   byte valid; EEPROM.get(0, valid);
+  if (cfg.magic == MAGIC && cfg.version == 3) {
+    // Version 3 had no top motor: keep the claw, limits and speed settings, add the new fields.
+    // The left motor moved to another socket, so ask for a fresh zero (Z) once.
+    cfg.version = VERSION; cfg.pos4 = 0; cfg.liftGear = 1; cfg.inv4 = 0; cfg.trusted = 0;
+    dirty = true;
+  }
   if (!goodConfig()) { defaults(); dirty = true; }
   else savedValid = valid == VALID_MARK;
   trusted = savedValid && cfg.trusted && cfg.enabled;
-  j2.setCurrentPosition(cfg.pos2); j3.setCurrentPosition(cfg.pos3);
+  j2.setCurrentPosition(cfg.pos2); j3.setCurrentPosition(cfg.pos3); j4.setCurrentPosition(cfg.pos4);
   j2.setPinsInverted(cfg.inv2, false, false); j3.setPinsInverted(cfg.inv3, false, false);
-  j2.setAcceleration(cfg.accel); j3.setAcceleration(cfg.accel);
+  j4.setPinsInverted(cfg.inv4, false, false);
+  j2.setAcceleration(cfg.accel); j3.setAcceleration(cfg.accel); j4.setAcceleration(cfg.accel);
   j2.setMaxSpeed(cfg.maxSteps * cfg.speedPercent / 100.0f);
   j3.setMaxSpeed(cfg.maxSteps * cfg.speedPercent / 100.0f);
+  j4.setMaxSpeed(cfg.maxSteps * cfg.speedPercent / 100.0f);
   for (byte i = 0; i < 5; ++i) pinMode(limitPins[i], INPUT_PULLUP);
   clawPos = clawTarget = cfg.clawPos;
   clawPulse = clawMicroseconds();
@@ -879,15 +968,16 @@ void loop() {
   stepMicros = 0;
   bool stepsReady = prepareSteps();
   if (stepsReady) serviceSteppers();
-  if (deferredCommand && !armMoving() && !pending && inputLen == 0) {
+  if (deferredCommand && !armMoving() && !pending && !pending4 && inputLen == 0) {
     memcpy(input, deferredInput, sizeof(input));
     deferredCommand = false; command();
   }
   readInput();
-  if ((jogging || clawJogging) && millis() - lastFeed >= 400) {
+  if ((jogging || jogging4 || clawJogging) && millis() - lastFeed >= 400) {
     watchdogTripped = true; stopAll(false);
   }
   armLoop();
+  liftLoop();
   if (stepsReady && !invalidatePending) clawLoop();
   uint32_t now = millis();
   if (now - lastStatus >= 100) { lastStatus = now; printStatus(); }

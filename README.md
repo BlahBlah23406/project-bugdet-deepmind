@@ -1,6 +1,16 @@
 # Robot Arm Dashboard
 
-Control the arm (joints 2 + 3 and the servo claw) from your keyboard.
+Control the arm (the left/right differential, the top lift motor and the servo claw) from your keyboard.
+
+## Motor sockets
+
+| Motor | Driver socket | Does |
+|---|---|---|
+| Right (j2) | A2 | pitch / roll, together with the left motor |
+| Left (j3) | A1 | pitch / roll, together with the right motor |
+| Top (j4) | A3 | lift: vertical rotation, on its own |
+
+If a motor turns the wrong way, tick its **Invert** box in the dashboard.
 
 ## Run it
 
@@ -19,6 +29,7 @@ No arm? Click **Start Demo / Simulator** to try it.
 |---|---|
 | W / S | Pitch up / down |
 | A / D | Roll left / right |
+| R / F | Lift up / down (top motor) |
 | → / ← | Claw open / close |
 | ↑ / ↓ | Faster / slower |
 | Shift | Slow, precise moves (hold) |
@@ -72,7 +83,7 @@ Enter it in **Estimate from Vref**. Coil current limit = Vref × 1.25 A.
 
 ## First time on a new arm
 
-1. Move the arm to its home pose and press **Z**.
+1. Move the arm (including the lift) to its home pose and press **Z**.
 2. Move the claw to fully open and click **Set open point here**. Then close it as far as it
    should go and click **Set close limit here**. If → closes it, click **Flip claw direction**.
 
