@@ -5,7 +5,10 @@ Host → Mega: ASCII lines ending in `\n`. Tokens separated by spaces. Unknown l
 Mega → Host: one JSON object per line (`\n`). Never print anything that isn't a JSON line.
 
 ## Hardware (verified against jlc5_backup.kicad_pcb)
-- Motor "j2" = driver A2: STEP D27, DIR D29.  Motor "j3" = driver A3: STEP D31, DIR D33.
+- Driver sockets (STEP / DIR): A1 D23/D25, A2 D27/D29, A3 D31/D33, A4 D35/D37, A5 D39/D41, A6 D45/D47.
+- Motor "j2" = RIGHT differential motor, socket A2: STEP D27, DIR D29.
+  Motor "j3" = LEFT differential motor, socket A1: STEP D23, DIR D25.
+  Motor "j4" = TOP motor (lift, vertical rotation), socket A3: STEP D31, DIR D33. See "Top motor (v6)".
 - EN for all drivers: D43 (LOW = on).  A4988, 1/8 microstep → 1600 steps per motor rev (200 × 8).
 - j2 and j3 are the two NEMA 17s of the arm's **differential**: both motors same way = PITCH,
   opposite ways = ROLL. Mixing (in motor steps):  j2 = pitch + roll,  j3 = pitch − roll.
@@ -113,6 +116,19 @@ Every 500 ms, after a `st` line (never in the same loop pass as one):
   (grip something) and try again").
   Also refuse if the latest mean is over 300 mV ("A0 reads too high: check the jumper to the servo's black wire");
   the dashboard shows the same text instead of a value when sa × shunt / 1000 > 300.
+
+## Top motor (v6)
+- A third stepper, `j4`, on socket A3 (STEP D31, DIR D33, shared EN D43). It is its own joint, "lift"
+  (vertical rotation), not part of the differential. Lift angle (deg) = j4 steps / (1600 × `lgear` / 360).
+- It jogs independently: starting or stopping the lift never ramps the pitch/roll motors down, and vice versa.
+  Same max speed, accel, speed %, watchdog, drivers-off and limit-switch rules as j2/j3. No soft limits yet.
+- Commands (the new last field is optional, so older hosts keep working):
+  `V <pitch> <roll> <claw> [<lift>]`, `M <j2> <j3> [<j4>]`, `G <pitch> <roll> [<lift_deg>]` (without it the
+  lift stays put; with it all three motors arrive together), `CFG <gear> <max> <accel> [<liftGear>]`,
+  `INV <j2> <j3> [<j4>]`. `Z` also zeroes the lift.
+- `st` adds `"j4":<steps>,"l":<lift deg, 1 dp>`. `cfg` adds `"lgear"` and `inv` becomes `[j2,j3,j4]`.
+- EEPROM layout version 4 appends `pos4`, `liftGear`, `inv4` to the end of the saved block. A version 3 save is
+  upgraded in place (claw, limits and speed kept) and comes up untrusted, so press `Z` once after upgrading.
 
 ## Claw is a servo (v2, replaces the 28BYJ-48 notes below)
 - goBILDA 2000 Series Dual Mode servo (Torque), 300° range. Signal on **D11** (J27 IN4, pin 4; IN1–IN3 unused). Pulse 500–2500 µs = 0–300°.

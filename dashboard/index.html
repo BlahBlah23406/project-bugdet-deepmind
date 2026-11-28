@@ -736,7 +736,7 @@
   <div id="untrustedBanner" class="banner warn-banner" role="alert">
     <span>⚠️ Position not verified — move to a known pose and press Zero</span>
     <div style="display:flex; gap:8px; align-items:center;">
-      <button type="button" id="btnBannerZero" class="warn-btn">Zero Pitch/Roll (Z)</button>
+      <button type="button" id="btnBannerZero" class="warn-btn">Zero Arm (Z)</button>
     </div>
   </div>
 
@@ -803,6 +803,22 @@
           </svg>
         </div>
 
+        <!-- Lift Gauge (top motor, vertical rotation) -->
+        <div class="gauge-item">
+          <div class="gauge-top">
+            <div>
+              <span class="gauge-label">Lift (top motor)</span>
+              <span class="gauge-limit-text">[No limits]</span>
+            </div>
+            <span class="gauge-val"><span id="valLift">0.0</span>°</span>
+          </div>
+          <svg class="gauge-svg" viewBox="0 0 300 24" aria-label="Lift angle gauge">
+            <rect x="0" y="6" width="300" height="12" rx="6" fill="var(--border)" />
+            <line x1="150" y1="3" x2="150" y2="21" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="2,2" />
+            <circle id="svgLiftNeedle" cx="150" cy="12" r="7" fill="var(--brand)" stroke="var(--panel)" stroke-width="2" />
+          </svg>
+        </div>
+
         <!-- Claw Gauge -->
         <div class="gauge-item">
           <div class="gauge-top">
@@ -823,12 +839,16 @@
       <!-- Raw Steps & System Flags -->
       <div class="status-grid">
         <div class="stat-box">
-          <span class="stat-label">Motor j2 (A2)</span>
+          <span class="stat-label">Right j2 (A2)</span>
           <span class="stat-value"><span id="valJ2">0</span> stp</span>
         </div>
         <div class="stat-box">
-          <span class="stat-label">Motor j3 (A3)</span>
+          <span class="stat-label">Left j3 (A1)</span>
           <span class="stat-value"><span id="valJ3">0</span> stp</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Top j4 (A3)</span>
+          <span class="stat-value"><span id="valJ4">0</span> stp</span>
         </div>
         <div class="stat-box">
           <span class="stat-label">Drivers (D43)</span>
@@ -1033,6 +1053,21 @@
         </div>
       </div>
 
+      <!-- Lift (top motor) Hold Buttons -->
+      <div class="sub-section">
+        <p class="sub-title">Lift Jog (Top Motor, Vertical Rotation)</p>
+        <div class="claw-jog-row">
+          <button type="button" class="jog-btn" data-jog-lift="1" id="btnJogLiftUp">
+            <span>▲ Lift +</span>
+            <span class="key-hint">R</span>
+          </button>
+          <button type="button" class="jog-btn" data-jog-lift="-1" id="btnJogLiftDown">
+            <span>▼ Lift −</span>
+            <span class="key-hint">F</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Speed Slider -->
       <div class="sub-section">
         <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1054,6 +1089,8 @@
           <div class="keycap" data-keycap="KeyS">S<span>Pitch−</span></div>
           <div class="keycap" data-keycap="KeyA">A<span>Roll−</span></div>
           <div class="keycap" data-keycap="KeyD">D<span>Roll+</span></div>
+          <div class="keycap" data-keycap="KeyR">R<span>Lift+</span></div>
+          <div class="keycap" data-keycap="KeyF">F<span>Lift−</span></div>
           <div class="keycap" data-keycap="ArrowLeft">←<span>Close</span></div>
           <div class="keycap" data-keycap="ArrowRight">→<span>Open</span></div>
           <div class="keycap" data-keycap="ArrowUp">↑<span>Spd+</span></div>
@@ -1087,9 +1124,9 @@
       <div class="sub-section">
         <p class="sub-title">Zero &amp; Claw Calibration</p>
         <div class="form-row">
-          <button type="button" id="btnZeroTrigger" class="warn-btn" style="flex:1;">Zero Pitch/Roll (Z)</button>
+          <button type="button" id="btnZeroTrigger" class="warn-btn" style="flex:1;">Zero Arm (Z)</button>
           <div id="zeroConfirmBox" class="inline-confirm hidden">
-            <span>Set P=0, R=0 &amp; Trust?</span>
+            <span>Set Pitch, Roll &amp; Lift = 0 and trust?</span>
             <button type="button" id="btnZeroConfirmYes" class="primary">Confirm Zero</button>
             <button type="button" id="btnZeroConfirmNo">Cancel</button>
           </div>
@@ -1115,10 +1152,14 @@
             <label for="inpGoRoll">Roll (deg)</label>
             <input type="number" id="inpGoRoll" value="0" step="1">
           </div>
+          <div class="field-group">
+            <label for="inpGoLift">Lift (deg)</label>
+            <input type="number" id="inpGoLift" value="0" step="1">
+          </div>
           <button type="button" id="btnGoJoints" class="primary" style="align-self:flex-end;">Go (G)</button>
         </div>
         <div class="form-row">
-          <button type="button" id="btnGoZeroPose" style="width:100%;">Go to 0°, 0° Origin</button>
+          <button type="button" id="btnGoZeroPose" style="width:100%;">Go to 0°, 0°, 0° Origin</button>
         </div>
       </div>
 
@@ -1136,12 +1177,18 @@
 
       <!-- Raw Single-Motor Test (M) -->
       <div class="sub-section">
-        <p class="sub-title">Raw Motor Test (Hold sends <code>M &lt;j2&gt; &lt;j3&gt;</code>)</p>
+        <p class="sub-title">Raw Motor Test (Hold sends <code>M &lt;j2&gt; &lt;j3&gt; &lt;j4&gt;</code>)</p>
         <div class="form-row">
-          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j2="1">j2 + (A2)</button>
-          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j2="-1">j2 − (A2)</button>
-          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j3="1">j3 + (A3)</button>
-          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j3="-1">j3 − (A3)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j2="1">Right + (A2)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j2="-1">Right − (A2)</button>
+        </div>
+        <div class="form-row">
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j3="1">Left + (A1)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j3="-1">Left − (A1)</button>
+        </div>
+        <div class="form-row">
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j4="1">Top + (A3)</button>
+          <button type="button" class="jog-btn" style="flex:1; min-height:42px;" data-raw-j4="-1">Top − (A3)</button>
         </div>
       </div>
     </section>
@@ -1198,6 +1245,10 @@
             <input type="number" id="inpCfgGear" value="1.0" min="0.01" step="0.1">
           </div>
           <div class="field-group">
+            <label for="inpCfgLiftGear">Lift Gear (turns/out)</label>
+            <input type="number" id="inpCfgLiftGear" value="1.0" min="0.01" step="0.1">
+          </div>
+          <div class="field-group">
             <label for="inpCfgMax">Max Speed (steps/s)</label>
             <input type="number" id="inpCfgMax" value="1200" min="50" max="10000" step="50">
           </div>
@@ -1213,11 +1264,15 @@
             <span style="font-size:0.8rem; font-weight:600; color:var(--muted);">Motor Direction Invert:</span>
             <label style="font-size:0.85rem; display:flex; align-items:center; gap:5px; cursor:pointer;">
               <input type="checkbox" id="chkInvJ2">
-              <span>Invert j2 (A2)</span>
+              <span>Invert right j2 (A2)</span>
             </label>
             <label style="font-size:0.85rem; display:flex; align-items:center; gap:5px; cursor:pointer;">
               <input type="checkbox" id="chkInvJ3">
-              <span>Invert j3 (A3)</span>
+              <span>Invert left j3 (A1)</span>
+            </label>
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="chkInvJ4">
+              <span>Invert top j4 (A3)</span>
             </label>
           </div>
           <span style="font-size:0.78rem; color:var(--muted); font-family:monospace;">
@@ -1255,7 +1310,13 @@
               <td><kbd>←</kbd> / <kbd>→</kbd></td>
               <td>Claw Close / Open (hold)</td>
               <td><kbd>Z</kbd></td>
-              <td>Zero Pitch &amp; Roll (opens confirm)</td>
+              <td>Zero Pitch, Roll &amp; Lift (opens confirm)</td>
+            </tr>
+            <tr>
+              <td><kbd>R</kbd> / <kbd>F</kbd></td>
+              <td>Lift + / − (top motor, hold)</td>
+              <td></td>
+              <td></td>
             </tr>
             <tr>
               <td><kbd>↑</kbd> / <kbd>↓</kbd></td>
@@ -1315,7 +1376,8 @@
           this.maxSteps = 1200;
           this.accel = 1500;
           this.lim = null; // [pmin, pmax, rmin, rmax] in deg or null
-          this.inv = [0, 0]; // [j2_inv, j3_inv]
+          this.inv = [0, 0, 0]; // [j2_inv, j3_inv, j4_inv]
+          this.lgear = 1.0; // top motor (lift) gear ratio
           this.cmax = 90.0; // claw close limit deg (default 90)
           this.copen = 150.0; // servo open point in servo degrees (default 150)
           this.cdir = 1; // servo direction +1 or -1 (default +1)
@@ -1326,9 +1388,11 @@
           // Dynamic state
           this.j2 = 0; // float internal steps, rounded on output
           this.j3 = 0;
+          this.j4 = 0; // top motor (lift)
           this.cDeg = 0.0; // claw angle in degrees (0 = open, up to cmax)
           this.v2 = 0; // current velocity steps/s
           this.v3 = 0;
+          this.v4 = 0;
           this.vc = 0; // current claw velocity deg/s
 
           this.en = 1;
@@ -1345,11 +1409,14 @@
           this.cmdPitchPct = 0;
           this.cmdRollPct = 0;
           this.cmdClawPct = 0;
+          this.cmdLiftPct = 0;
           this.cmdM2Pct = 0;
           this.cmdM3Pct = 0;
+          this.cmdM4Pct = 0;
 
           this.targetJ2 = 0;
           this.targetJ3 = 0;
+          this.targetJ4 = 0;
           this.clawMode = 'idle'; // 'idle' | 'jog' | 'goto'
           this.targetCDeg = 0.0;
 
@@ -1374,6 +1441,14 @@
         getRollDeg() {
           const rollSteps = (this.j2 - this.j3) / 2.0;
           return rollSteps / this.stepsPerDeg();
+        }
+
+        liftStepsPerDeg() {
+          return (this.STEPS_PER_REV * this.lgear) / 360.0;
+        }
+
+        getLiftDeg() {
+          return this.j4 / this.liftStepsPerDeg();
         }
 
         getClawDeg() {
@@ -1432,7 +1507,8 @@
             max: Math.round(this.maxSteps),
             acc: Math.round(this.accel),
             lim: this.lim ? this.lim.map(v => Number(v.toFixed(1))) : null,
-            inv: [this.inv[0] ? 1 : 0, this.inv[1] ? 1 : 0],
+            lgear: Number(this.lgear.toFixed(3)),
+            inv: [this.inv[0] ? 1 : 0, this.inv[1] ? 1 : 0, this.inv[2] ? 1 : 0],
             cmax: Number(this.cmax.toFixed(1)),
             copen: Number(this.copen.toFixed(1)),
             cdir: this.cdir < 0 ? -1 : 1,
@@ -1441,7 +1517,7 @@
         }
 
         isMoving() {
-          return Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.vc) > 0.1 ||
+          return Math.abs(this.v2) > 0.5 || Math.abs(this.v3) > 0.5 || Math.abs(this.v4) > 0.5 || Math.abs(this.vc) > 0.1 ||
                  this.mode === 'goto_g' || this.clawMode === 'goto';
         }
 
@@ -1450,8 +1526,10 @@
             t: 'st',
             j2: Math.round(this.j2),
             j3: Math.round(this.j3),
+            j4: Math.round(this.j4),
             p: Number(this.getPitchDeg().toFixed(1)),
             r: Number(this.getRollDeg().toFixed(1)),
+            l: Number(this.getLiftDeg().toFixed(1)),
             c: Number(this.getClawDeg().toFixed(1)),
             mv: this.isMoving() ? 1 : 0,
             en: this.en ? 1 : 0,
@@ -1469,8 +1547,8 @@
           const moving = this.isMoving();
           const v = Number((12.05 - (moving ? 0.15 : 0) + Math.random() * 0.08).toFixed(2));
           const activeMotors = this.mode === 'jog_m'
-            ? Number(this.cmdM2Pct !== 0) + Number(this.cmdM3Pct !== 0)
-            : Number(Math.abs(this.v2) > 1) + Number(Math.abs(this.v3) > 1);
+            ? Number(this.cmdM2Pct !== 0) + Number(this.cmdM3Pct !== 0) + Number(this.cmdM4Pct !== 0)
+            : Number(Math.abs(this.v2) > 1) + Number(Math.abs(this.v3) > 1) + Number(Math.abs(this.v4) > 1);
           const noise = () => Math.round(Math.random() * 8) - 4;
           const ma = (this.en ? 600 + 350 * activeMotors : 40) + noise();
           const clawActive = Boolean(this.vc || Date.now() < this.servoLoadUntil);
@@ -1509,16 +1587,18 @@
           this.lastStepMs = now;
 
           // Check 400ms watchdog while jogging
-          const isJogging = (this.mode === 'jog_v' && (this.cmdPitchPct !== 0 || this.cmdRollPct !== 0)) ||
-                            (this.mode === 'jog_m' && (this.cmdM2Pct !== 0 || this.cmdM3Pct !== 0)) ||
+          const isJogging = (this.mode === 'jog_v' && (this.cmdPitchPct !== 0 || this.cmdRollPct !== 0 || this.cmdLiftPct !== 0)) ||
+                            (this.mode === 'jog_m' && (this.cmdM2Pct !== 0 || this.cmdM3Pct !== 0 || this.cmdM4Pct !== 0)) ||
                             (this.clawMode === 'jog' && this.cmdClawPct !== 0);
           if (isJogging && (now - this.lastWatchdogFeedMs > 400)) {
             this.wd = 1;
             this.cmdPitchPct = 0;
             this.cmdRollPct = 0;
             this.cmdClawPct = 0;
+            this.cmdLiftPct = 0;
             this.cmdM2Pct = 0;
             this.cmdM3Pct = 0;
+            this.cmdM4Pct = 0;
             this.mode = 'idle';
             this.clawMode = 'idle';
             this.vc = 0;
@@ -1562,6 +1642,7 @@
           if (!this.en) {
             this.v2 = 0;
             this.v3 = 0;
+            this.v4 = 0;
             this.mode = 'idle';
             return;
           }
@@ -1569,15 +1650,17 @@
           const effectiveMax = this.maxSteps * (this.spd / 100.0);
           let desV2 = 0;
           let desV3 = 0;
+          let desV4 = 0;
           let rampAcc = this.accel;
 
           if (this.mode === 'stopping') {
             desV2 = 0;
             desV3 = 0;
             rampAcc = this.accel * 3.0; // S command uses 3x accel
-            if (Math.abs(this.v2) < 1 && Math.abs(this.v3) < 1) {
+            if (Math.abs(this.v2) < 1 && Math.abs(this.v3) < 1 && Math.abs(this.v4) < 1) {
               this.v2 = 0;
               this.v3 = 0;
+              this.v4 = 0;
               this.mode = 'idle';
             }
           } else if (this.mode === 'jog_v') {
@@ -1602,33 +1685,49 @@
             const rScaled = rPct * scale;
             desV2 = ((pScaled + rScaled) / 100.0) * effectiveMax;
             desV3 = ((pScaled - rScaled) / 100.0) * effectiveMax;
+            desV4 = (this.cmdLiftPct / 100.0) * effectiveMax;
           } else if (this.mode === 'jog_m') {
             const s2 = this.inv[0] ? -1 : 1;
             const s3 = this.inv[1] ? -1 : 1;
+            const s4 = this.inv[2] ? -1 : 1;
             desV2 = (this.cmdM2Pct / 100.0) * effectiveMax * s2;
             desV3 = (this.cmdM3Pct / 100.0) * effectiveMax * s3;
+            desV4 = (this.cmdM4Pct / 100.0) * effectiveMax * s4;
           } else if (this.mode === 'goto_g') {
             const rem2 = this.targetJ2 - this.j2;
             const rem3 = this.targetJ3 - this.j3;
-            const maxRem = Math.max(Math.abs(rem2), Math.abs(rem3));
-            if (maxRem < 1.0 && Math.abs(this.v2) < 5 && Math.abs(this.v3) < 5) {
+            const rem4 = this.targetJ4 - this.j4;
+            const maxRem = Math.max(Math.abs(rem2), Math.abs(rem3), Math.abs(rem4));
+            if (maxRem < 1.0 && Math.abs(this.v2) < 5 && Math.abs(this.v3) < 5 && Math.abs(this.v4) < 5) {
               this.j2 = this.targetJ2;
               this.j3 = this.targetJ3;
+              this.j4 = this.targetJ4;
               this.v2 = 0;
               this.v3 = 0;
+              this.v4 = 0;
               this.mode = 'idle';
             } else {
               // Coordinated arrival: scale speeds by ratio of remaining distance
               const ratio2 = maxRem > 0 ? Math.abs(rem2) / maxRem : 0;
               const ratio3 = maxRem > 0 ? Math.abs(rem3) / maxRem : 0;
+              const ratio4 = maxRem > 0 ? Math.abs(rem4) / maxRem : 0;
               const stopSpeed2 = Math.sqrt(2 * this.accel * ratio2 * Math.abs(rem2));
               const stopSpeed3 = Math.sqrt(2 * this.accel * ratio3 * Math.abs(rem3));
+              const stopSpeed4 = Math.sqrt(2 * this.accel * ratio4 * Math.abs(rem4));
               const spd2 = Math.min(effectiveMax * ratio2, stopSpeed2);
               const spd3 = Math.min(effectiveMax * ratio3, stopSpeed3);
+              const spd4 = Math.min(effectiveMax * ratio4, stopSpeed4);
               desV2 = Math.sign(rem2) * spd2;
               desV3 = Math.sign(rem3) * spd3;
+              desV4 = Math.sign(rem4) * spd4;
             }
           }
+
+          // The top motor ramps on its own (it is not part of the differential)
+          const dv4 = desV4 - this.v4;
+          const allowedDv4 = rampAcc * dt;
+          this.v4 = Math.abs(dv4) <= allowedDv4 ? desV4 : this.v4 + Math.sign(dv4) * allowedDv4;
+          this.j4 += this.v4 * dt;
 
           // Coordinated ramp for v2 and v3
           const dv2 = desV2 - this.v2;
@@ -1682,7 +1781,8 @@
               const p = parseInt(tokens[1], 10);
               const r = parseInt(tokens[2], 10);
               const c = parseInt(tokens[3], 10);
-              if (Number.isNaN(p) || Number.isNaN(r) || Number.isNaN(c)) {
+              const l = tokens.length > 4 ? parseInt(tokens[4], 10) : 0; // optional lift
+              if (Number.isNaN(p) || Number.isNaN(r) || Number.isNaN(c) || Number.isNaN(l)) {
                 this.emit({ t: 'err', s: 'V args must be integers -100..100' });
                 return;
               }
@@ -1691,6 +1791,7 @@
               this.cmdPitchPct = Math.max(-100, Math.min(100, p));
               this.cmdRollPct = Math.max(-100, Math.min(100, r));
               this.cmdClawPct = Math.max(-100, Math.min(100, c));
+              this.cmdLiftPct = Math.max(-100, Math.min(100, l));
               this.mode = 'jog_v';
               if (this.cmdClawPct !== 0) {
                 this.clawMode = 'jog';
@@ -1707,7 +1808,8 @@
               }
               const m2 = parseInt(tokens[1], 10);
               const m3 = parseInt(tokens[2], 10);
-              if (Number.isNaN(m2) || Number.isNaN(m3)) {
+              const m4 = tokens.length > 3 ? parseInt(tokens[3], 10) : 0; // optional top motor
+              if (Number.isNaN(m2) || Number.isNaN(m3) || Number.isNaN(m4)) {
                 this.emit({ t: 'err', s: 'M args must be integers -100..100' });
                 return;
               }
@@ -1715,6 +1817,7 @@
               this.wd = 0;
               this.cmdM2Pct = Math.max(-100, Math.min(100, m2));
               this.cmdM3Pct = Math.max(-100, Math.min(100, m3));
+              this.cmdM4Pct = Math.max(-100, Math.min(100, m4));
               this.mode = 'jog_m';
               break;
             }
@@ -1727,8 +1830,10 @@
               this.cmdPitchPct = 0;
               this.cmdRollPct = 0;
               this.cmdClawPct = 0;
+              this.cmdLiftPct = 0;
               this.cmdM2Pct = 0;
               this.cmdM3Pct = 0;
+              this.cmdM4Pct = 0;
               this.mode = 'stopping';
               this.clawMode = 'idle';
               this.vc = 0;
@@ -1750,8 +1855,10 @@
               }
               const targetP = parseFloat(tokens[1]);
               const targetR = parseFloat(tokens[2]);
-              if (Number.isNaN(targetP) || Number.isNaN(targetR)) {
-                this.emit({ t: 'err', s: 'Invalid pitch/roll angles for G' });
+              const hasLift = tokens.length > 3;
+              const targetL = hasLift ? parseFloat(tokens[3]) : 0;
+              if (Number.isNaN(targetP) || Number.isNaN(targetR) || Number.isNaN(targetL)) {
+                this.emit({ t: 'err', s: 'Invalid pitch/roll/lift angles for G' });
                 return;
               }
               if (this.lim) {
@@ -1766,8 +1873,11 @@
               const rSteps = targetR * spd;
               this.targetJ2 = Math.round(pSteps + rSteps);
               this.targetJ3 = Math.round(pSteps - rSteps);
+              this.targetJ4 = hasLift ? Math.round(targetL * this.liftStepsPerDeg()) : Math.round(this.j4);
+              this.cmdLiftPct = 0;
               this.mode = 'goto_g';
-              this.emit({ t: 'msg', s: `Going to Pitch ${targetP.toFixed(1)}°, Roll ${targetR.toFixed(1)}°` });
+              this.emit({ t: 'msg', s: `Going to Pitch ${targetP.toFixed(1)}°, Roll ${targetR.toFixed(1)}°` +
+                (hasLift ? `, Lift ${targetL.toFixed(1)}°` : '') });
               break;
             }
             case 'GC': {
@@ -1790,11 +1900,13 @@
             case 'Z': {
               this.j2 = 0;
               this.j3 = 0;
+              this.j4 = 0;
               this.v2 = 0;
               this.v3 = 0;
+              this.v4 = 0;
               this.mode = 'idle';
               this.tr = 1;
-              this.emit({ t: 'msg', s: 'Pitch/Roll zeroed (0.0°, 0.0°), position trusted = true' });
+              this.emit({ t: 'msg', s: 'Arm zeroed (pitch, roll, lift = 0.0°), position trusted = true' });
               this.emitSt();
               break;
             }
@@ -1843,6 +1955,7 @@
                 this.tr = 0;
                 this.v2 = 0;
                 this.v3 = 0;
+                this.v4 = 0;
                 this.vc = 0;
                 this.mode = 'idle';
                 this.clawMode = 'idle';
@@ -1871,14 +1984,17 @@
               const gear = parseFloat(tokens[1]);
               const maxS = parseInt(tokens[2], 10);
               const acc = parseInt(tokens[3], 10);
-              if (Number.isNaN(gear) || gear <= 0 || Number.isNaN(maxS) || maxS <= 0 || Number.isNaN(acc) || acc <= 0) {
+              const lgear = tokens.length > 4 ? parseFloat(tokens[4]) : this.lgear;
+              if (Number.isNaN(gear) || gear <= 0 || Number.isNaN(maxS) || maxS <= 0 || Number.isNaN(acc) || acc <= 0 ||
+                  Number.isNaN(lgear) || lgear <= 0) {
                 this.emit({ t: 'err', s: 'Invalid CFG values' });
                 return;
               }
               this.gear = gear;
               this.maxSteps = maxS;
               this.accel = acc;
-              this.emit({ t: 'msg', s: `Saved CFG: gear=${gear}, max=${maxS}, acc=${acc}` });
+              this.lgear = lgear;
+              this.emit({ t: 'msg', s: `Saved CFG: gear=${gear}, max=${maxS}, acc=${acc}, lift gear=${lgear}` });
               this.emitCfg();
               break;
             }
@@ -1934,8 +2050,9 @@
                 this.emit({ t: 'err', s: 'Usage: INV <0|1> <0|1>' });
                 return;
               }
-              this.inv = [tokens[1] === '1' ? 1 : 0, tokens[2] === '1' ? 1 : 0];
-              this.emit({ t: 'msg', s: `Motor invert set to [${this.inv[0]}, ${this.inv[1]}]` });
+              this.inv = [tokens[1] === '1' ? 1 : 0, tokens[2] === '1' ? 1 : 0,
+                tokens.length > 3 ? (tokens[3] === '1' ? 1 : 0) : this.inv[2]];
+              this.emit({ t: 'msg', s: `Motor invert set to [${this.inv.join(', ')}]` });
               this.emitCfg();
               break;
             }
@@ -2207,13 +2324,13 @@
 
         // Telemetry state from st / cfg
         st: {
-          j2: 0, j3: 0, p: 0.0, r: 0.0, c: 0.0,
+          j2: 0, j3: 0, j4: 0, p: 0.0, r: 0.0, l: 0.0, c: 0.0,
           mv: 0, en: 0, tr: 0, spd: 50, wd: 0,
           lim: '-----', sw: -1, enc: 0, cu: 0
         },
         cfg: {
-          ver: 1, gear: 1.0, max: 1200, acc: 1500,
-          lim: null, inv: [0, 0], cmax: 90.0, copen: 150, cdir: 1, shunt: 0
+          ver: 1, gear: 1.0, lgear: 1.0, max: 1200, acc: 1500,
+          lim: null, inv: [0, 0, 0], cmax: 90.0, copen: 150, cdir: 1, shunt: 0
         },
         scalCalibrated: false,
         pendingScal: false,
@@ -2224,8 +2341,8 @@
         // Held keys & active pointer holds
         heldKeys: new Set(),
         shiftHeld: false,
-        pointerJog: { pitch: 0, roll: 0, claw: 0 },
-        pointerRaw: { j2: 0, j3: 0 },
+        pointerJog: { pitch: 0, roll: 0, claw: 0, lift: 0 },
+        pointerRaw: { j2: 0, j3: 0, j4: 0 },
         wasJoggingV: false,
         wasJoggingM: false
       };
@@ -2267,8 +2384,12 @@
         svgClawFill: document.getElementById('svgClawFill'),
         svgClawNeedle: document.getElementById('svgClawNeedle'),
 
+        valLift: document.getElementById('valLift'),
+        svgLiftNeedle: document.getElementById('svgLiftNeedle'),
+
         valJ2: document.getElementById('valJ2'),
         valJ3: document.getElementById('valJ3'),
+        valJ4: document.getElementById('valJ4'),
         valDrivers: document.getElementById('valDrivers'),
         valTrusted: document.getElementById('valTrusted'),
         valSpd: document.getElementById('valSpd'),
@@ -2317,6 +2438,7 @@
 
         inpGoPitch: document.getElementById('inpGoPitch'),
         inpGoRoll: document.getElementById('inpGoRoll'),
+        inpGoLift: document.getElementById('inpGoLift'),
         btnGoJoints: document.getElementById('btnGoJoints'),
         btnGoZeroPose: document.getElementById('btnGoZeroPose'),
         inpGoClaw: document.getElementById('inpGoClaw'),
@@ -2331,11 +2453,13 @@
         btnLimOff: document.getElementById('btnLimOff'),
 
         inpCfgGear: document.getElementById('inpCfgGear'),
+        inpCfgLiftGear: document.getElementById('inpCfgLiftGear'),
         inpCfgMax: document.getElementById('inpCfgMax'),
         inpCfgAcc: document.getElementById('inpCfgAcc'),
         btnCfgSave: document.getElementById('btnCfgSave'),
         chkInvJ2: document.getElementById('chkInvJ2'),
         chkInvJ3: document.getElementById('chkInvJ3'),
+        chkInvJ4: document.getElementById('chkInvJ4'),
         valCfgCmax: document.getElementById('valCfgCmax'),
 
         chkLogTx: document.getElementById('chkLogTx'),
@@ -2723,6 +2847,12 @@
 
         el.valJ2.textContent = st.j2;
         el.valJ3.textContent = st.j3;
+        el.valJ4.textContent = st.j4 !== undefined ? st.j4 : '—';
+
+        // Lift (top motor) gauge, -120..+120 deg scale
+        const liftDeg = Number(st.l) || 0;
+        el.valLift.textContent = liftDeg.toFixed(1);
+        el.svgLiftNeedle.setAttribute('cx', mapAngleToSvg(liftDeg, -120, 120).toFixed(1));
 
         // Moving indicator
         if (st.mv) {
@@ -2835,6 +2965,7 @@
       function updateConfigUI() {
         const cfg = state.cfg;
         el.inpCfgGear.value = cfg.gear;
+        el.inpCfgLiftGear.value = cfg.lgear !== undefined ? cfg.lgear : 1.0;
         el.inpCfgMax.value = cfg.max;
         el.inpCfgAcc.value = cfg.acc;
         el.valCfgCmax.textContent = Number(cfg.cmax || 90).toFixed(1);
@@ -2847,6 +2978,7 @@
         if (Array.isArray(cfg.inv) && cfg.inv.length >= 2) {
           el.chkInvJ2.checked = Boolean(cfg.inv[0]);
           el.chkInvJ3.checked = Boolean(cfg.inv[1]);
+          el.chkInvJ4.checked = Boolean(cfg.inv[2]);
         }
 
         if (Array.isArray(cfg.lim) && cfg.lim.length === 4) {
@@ -3024,17 +3156,19 @@
         state.pointerJog.pitch = 0;
         state.pointerJog.roll = 0;
         state.pointerJog.claw = 0;
+        state.pointerJog.lift = 0;
         state.pointerRaw.j2 = 0;
         state.pointerRaw.j3 = 0;
+        state.pointerRaw.j4 = 0;
         document.querySelectorAll('.keycap.lit').forEach(c => c.classList.remove('lit'));
         document.querySelectorAll('.active-hold').forEach(b => b.classList.remove('active-hold'));
         if (sendZeroV && state.connected) {
           if (state.wasJoggingV) {
-            sendCommand('V 0 0 0');
+            sendCommand('V 0 0 0 0');
             state.wasJoggingV = false;
           }
           if (state.wasJoggingM) {
-            sendCommand('M 0 0');
+            sendCommand('M 0 0 0');
             state.wasJoggingM = false;
           }
         } else {
@@ -3063,7 +3197,7 @@
         const isQueryKey = e.key === '?';
 
         const handledCodes = new Set([
-          'KeyW', 'KeyS', 'KeyA', 'KeyD',
+          'KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyR', 'KeyF',
           'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
           'Space', 'KeyE', 'KeyZ', 'KeyH'
         ]);
@@ -3086,6 +3220,8 @@
           case 'KeyS':
           case 'KeyA':
           case 'KeyD':
+          case 'KeyR':
+          case 'KeyF':
           case 'ArrowLeft':
           case 'ArrowRight': {
             state.heldKeys.add(code);
@@ -3189,7 +3325,16 @@
         bindHoldButton(btn, () => { state.pointerJog.claw = dir; }, () => { if (state.pointerJog.claw === dir) state.pointerJog.claw = 0; });
       });
 
-      // Raw motor test hold buttons (M <j2> <j3>)
+      document.querySelectorAll('[data-jog-lift]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-jog-lift'), 10);
+        bindHoldButton(btn, () => { state.pointerJog.lift = dir; }, () => { if (state.pointerJog.lift === dir) state.pointerJog.lift = 0; });
+      });
+
+      // Raw motor test hold buttons (M <j2> <j3> <j4>)
+      document.querySelectorAll('[data-raw-j4]').forEach((btn) => {
+        const dir = parseInt(btn.getAttribute('data-raw-j4'), 10);
+        bindHoldButton(btn, () => { state.pointerRaw.j4 = dir; }, () => { if (state.pointerRaw.j4 === dir) state.pointerRaw.j4 = 0; });
+      });
       document.querySelectorAll('[data-raw-j2]').forEach((btn) => {
         const dir = parseInt(btn.getAttribute('data-raw-j2'), 10);
         bindHoldButton(btn, () => { state.pointerRaw.j2 = dir; }, () => { if (state.pointerRaw.j2 === dir) state.pointerRaw.j2 = 0; });
@@ -3224,14 +3369,15 @@
         const mag = (state.shiftHeld || el.chkPrecision.checked) ? 25 : 100;
 
         // Check raw motor hold first
-        if (state.pointerRaw.j2 !== 0 || state.pointerRaw.j3 !== 0) {
+        if (state.pointerRaw.j2 !== 0 || state.pointerRaw.j3 !== 0 || state.pointerRaw.j4 !== 0) {
           const m2 = state.pointerRaw.j2 * mag;
           const m3 = state.pointerRaw.j3 * mag;
-          sendCommand(`M ${m2} ${m3}`);
+          const m4 = state.pointerRaw.j4 * mag;
+          sendCommand(`M ${m2} ${m3} ${m4}`);
           state.wasJoggingM = true;
           return;
         } else if (state.wasJoggingM) {
-          sendCommand('M 0 0');
+          sendCommand('M 0 0 0');
           state.wasJoggingM = false;
         }
 
@@ -3252,6 +3398,14 @@
         if (state.heldKeys.has('ArrowRight')) cDir -= 1;
         cDir = Math.max(-1, Math.min(1, cDir));
 
+        // R = lift up (+), F = lift down (-): the top motor
+        let lDir = state.pointerJog.lift;
+        if (state.heldKeys.has('KeyR')) lDir += 1;
+        if (state.heldKeys.has('KeyF')) lDir -= 1;
+        lDir = Math.max(-1, Math.min(1, lDir));
+        document.getElementById('btnJogLiftUp').classList.toggle('active-hold', lDir > 0);
+        document.getElementById('btnJogLiftDown').classList.toggle('active-hold', lDir < 0);
+
         // Visual feedback on on-screen buttons when keyboard keys held
         document.getElementById('btnJogPitchUp').classList.toggle('active-hold', pDir > 0);
         document.getElementById('btnJogPitchDown').classList.toggle('active-hold', pDir < 0);
@@ -3260,13 +3414,13 @@
         document.getElementById('btnJogClawClose').classList.toggle('active-hold', cDir > 0);
         document.getElementById('btnJogClawOpen').classList.toggle('active-hold', cDir < 0);
 
-        const anyMotionHeld = (pDir !== 0 || rDir !== 0 || cDir !== 0);
+        const anyMotionHeld = (pDir !== 0 || rDir !== 0 || cDir !== 0 || lDir !== 0);
         if (anyMotionHeld) {
-          sendCommand(`V ${pDir * mag} ${rDir * mag} ${cDir * mag}`);
+          sendCommand(`V ${pDir * mag} ${rDir * mag} ${cDir * mag} ${lDir * mag}`);
           state.wasJoggingV = true;
         } else if (state.wasJoggingV) {
-          // Released: send V 0 0 0 once
-          sendCommand('V 0 0 0');
+          // Released: send V 0 0 0 0 once
+          sendCommand('V 0 0 0 0');
           state.wasJoggingV = false;
         } else {
           // Every 200 ms (every 4th 50ms tick), send P while connected and idle
@@ -3318,12 +3472,14 @@
       el.btnGoJoints.addEventListener('click', () => {
         const p = parseFloat(el.inpGoPitch.value) || 0;
         const r = parseFloat(el.inpGoRoll.value) || 0;
-        sendCommand(`G ${p} ${r}`);
+        const l = parseFloat(el.inpGoLift.value) || 0;
+        sendCommand(`G ${p} ${r} ${l}`);
       });
       el.btnGoZeroPose.addEventListener('click', () => {
         el.inpGoPitch.value = '0';
         el.inpGoRoll.value = '0';
-        sendCommand('G 0 0');
+        el.inpGoLift.value = '0';
+        sendCommand('G 0 0 0');
       });
       el.btnGoClaw.addEventListener('click', () => {
         const c = parseFloat(el.inpGoClaw.value) || 0;
@@ -3351,16 +3507,19 @@
         const gear = parseFloat(el.inpCfgGear.value) || 1.0;
         const max = parseInt(el.inpCfgMax.value, 10) || 1200;
         const acc = parseInt(el.inpCfgAcc.value, 10) || 1500;
-        sendCommand(`CFG ${gear} ${max} ${acc}`);
+        const lgear = parseFloat(el.inpCfgLiftGear.value) || 1.0;
+        sendCommand(`CFG ${gear} ${max} ${acc} ${lgear}`);
       });
 
       function sendInvertConfig() {
         const i2 = el.chkInvJ2.checked ? 1 : 0;
         const i3 = el.chkInvJ3.checked ? 1 : 0;
-        sendCommand(`INV ${i2} ${i3}`);
+        const i4 = el.chkInvJ4.checked ? 1 : 0;
+        sendCommand(`INV ${i2} ${i3} ${i4}`);
       }
       el.chkInvJ2.addEventListener('change', sendInvertConfig);
       el.chkInvJ3.addEventListener('change', sendInvertConfig);
+      el.chkInvJ4.addEventListener('change', sendInvertConfig);
 
       // Log clear & manual command
       el.btnClearLog.addEventListener('click', () => {
